@@ -57,4 +57,18 @@ jobs:
           pattern: '*'
           merge-multiple: true
 
-      -
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA="${{ github.sha }}"
+          SHORT="${SHA::7}"
+          SUBJECT=$(git log -1 --pretty=%s)
+          TAG="release-${SHORT}"
+
+          gh release create "$TAG" \
+            --title "${SHORT}: ${SUBJECT}" \
+            --notes "Commit: \`${{ github.sha }}\`" \
+            kprox_m5stack-atoms3_full.bin \
+            kprox_m5stack-stamps3_full.bin \
+            kprox-discovery.apk
