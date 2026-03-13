@@ -7,6 +7,8 @@ name: Release
 jobs:
   build-firmware:
     runs-on: ubuntu-latest
+    env:
+      PLATFORMIO_CORE_DIR: ${{ github.workspace }}/.pio
     steps:
       - uses: actions/checkout@v4
 
