@@ -222,7 +222,7 @@ Types: `Sum 1-100 = 5050`
 
 ### Unlock Android
 ```
-{MOUSEMOVE 10 0}{ENTER}{SLEEP 100}<PASSWORD>{SLEEP 300}{ENTER}
+{MOUSEMOVE 10 0}{ENTER}{SLEEP 100}mysecurepassword{SLEEP 300}{ENTER}
 ```
 
 ### Unlock Windows
