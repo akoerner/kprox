@@ -24,6 +24,9 @@ jobs:
       - name: Build Cardputer ADV
         run: pio run -e m5stack-cardputer
 
+      - name: Debug
+        run: find . -name "*_full.bin" | sort
+
       - uses: actions/upload-artifact@v4
         with:
           name: firmware
