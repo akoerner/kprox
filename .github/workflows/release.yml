@@ -1,4 +1,11 @@
-build-firmware:
+name: Release
+
+"on":
+  push:
+    branches: [master]
+
+jobs:
+  build-firmware:
     runs-on: ubuntu-latest
     defaults:
       run:
