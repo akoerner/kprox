@@ -1,0 +1,7 @@
+{
+  "gadget": {
+    "name": "Lock Android",
+    "description": "Lock Android device",
+    "content": "{GUI L}"
+  }
+}
