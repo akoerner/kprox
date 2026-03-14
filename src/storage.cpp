@@ -36,28 +36,38 @@ void loadWifiEnabledSettings() {
 
 void saveBtSettings() {
     preferences.begin("kprox", false);
-    preferences.putBool("btEnabled", bluetoothEnabled);
+    preferences.putBool("btEnabled",  bluetoothEnabled);
+    preferences.putBool("bleKbEn",    bleKeyboardEnabled);
+    preferences.putBool("bleMouseEn", bleMouseEnabled);
     preferences.end();
     blinkLED(10, LED_COLOR_SAVE, LED_SAVE_DUTY_CYCLE);
 }
 
 void loadBtSettings() {
     preferences.begin("kprox", false);
-    bluetoothEnabled = preferences.getBool("btEnabled", true);
+    bluetoothEnabled  = preferences.getBool("btEnabled",  true);
+    bleKeyboardEnabled = preferences.getBool("bleKbEn",   true);
+    bleMouseEnabled    = preferences.getBool("bleMouseEn",true);
     preferences.end();
 }
 
 #ifdef BOARD_HAS_USB_HID
 void saveUSBSettings() {
     preferences.begin("kprox", false);
-    preferences.putBool("usbEnabled", usbEnabled);
+    preferences.putBool("usbEnabled",    usbEnabled);
+    preferences.putBool("usbKbEn",       usbKeyboardEnabled);
+    preferences.putBool("usbMouseEn",    usbMouseEnabled);
+    preferences.putBool("fido2En",       fido2Enabled);
     preferences.end();
     blinkLED(10, LED_COLOR_SAVE, LED_SAVE_DUTY_CYCLE);
 }
 
 void loadUSBSettings() {
     preferences.begin("kprox", false);
-    usbEnabled = preferences.getBool("usbEnabled", true);
+    usbEnabled         = preferences.getBool("usbEnabled",  true);
+    usbKeyboardEnabled = preferences.getBool("usbKbEn",     true);
+    usbMouseEnabled    = preferences.getBool("usbMouseEn",  true);
+    fido2Enabled       = preferences.getBool("fido2En",     false);
     preferences.end();
 }
 #else
@@ -77,6 +87,18 @@ void loadUSBIdentitySettings() {
     preferences.begin("kprox", false);
     usbManufacturer = preferences.getString("usbMfg",     DEFAULT_MANUFACTURER);
     usbProduct      = preferences.getString("usbProduct", DEFAULT_PRODUCT_NAME);
+    preferences.end();
+}
+
+void saveSinkSettings() {
+    preferences.begin("kprox", false);
+    preferences.putInt("sinkMaxSize", maxSinkSize);
+    preferences.end();
+}
+
+void loadSinkSettings() {
+    preferences.begin("kprox", false);
+    maxSinkSize = preferences.getInt("sinkMaxSize", 0);
     preferences.end();
 }
 

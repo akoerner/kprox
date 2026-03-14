@@ -381,7 +381,7 @@ static bool isControlToken(const String& token) {
             u == "PAGEUP" || u == "PAGEDOWN" || u == "PRINTSCREEN" || u == "SYSRQ" || isFKey ||
             u == "BLUETOOTH_ENABLE" || u == "BLUETOOTH_DISABLE" ||
             u == "USB_ENABLE" || u == "USB_DISABLE" ||
-            u == "HALT" || u == "RESUME" ||
+            u == "HALT" || u == "RESUME" || u == "SINKPROX" ||
             u == "ENDLOOP" || u == "ENDFOR" || u == "ENDWHILE" ||
             u == "ELSE" || u == "ENDIF" || u == "BREAK" ||
             u.startsWith("SLEEP ")   || u.startsWith("CHORD ")   || u.startsWith("HID ")    ||
@@ -451,6 +451,17 @@ void parseAndSendText(const String& text, std::map<String, String>& vars) {
         else if (u == "BLUETOOTH_DISABLE") disableBluetooth();
         else if (u == "USB_ENABLE")        enableUSB();
         else if (u == "USB_DISABLE")       disableUSB();
+        else if (u == "SINKPROX") {
+            if (SPIFFS.exists("/sink.txt")) {
+                File f = SPIFFS.open("/sink.txt", "r");
+                if (f) {
+                    String content = f.readString();
+                    f.close();
+                    SPIFFS.remove("/sink.txt");
+                    if (!content.isEmpty()) pendingTokenStrings.push_back(content);
+                }
+            }
+        }
         else if (u == "HALT")   { haltAllOperations(); return; }
         else if (u == "RESUME") { resumeOperations(); }
         else if (u.startsWith("SLEEP ")) {

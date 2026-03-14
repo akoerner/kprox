@@ -58,14 +58,17 @@ void enableUSB() {
         USB.manufacturerName(usbManufacturer.c_str());
         USB.productName(usbProduct.c_str());
         USB.serialNumber(USB_SERIAL_NUMBER);
+        if (fido2Enabled) FIDO2Device.begin();
         USB.begin();
-        USBKeyboard.begin();
-        USBMouse.begin();
+        if (usbKeyboardEnabled) { USBKeyboard.begin(); usbKeyboardReady = true; }
+        if (usbMouseEnabled)    { USBMouse.begin();    usbMouseReady    = true; }
         usbInitialized = true;
         delay(1000);
+    } else {
+        // Already initialised — just update ready flags
+        usbKeyboardReady = usbKeyboardEnabled;
+        usbMouseReady    = usbMouseEnabled;
     }
-    usbKeyboardReady = true;
-    usbMouseReady    = true;
     saveUSBSettings();
     if (ledEnabled) setLED(LED_COLOR_USB_ENABLE, 500);
 }
@@ -74,9 +77,8 @@ void disableUSB() {
     if (!usbEnabled) return;
     usbEnabled = false;
     if (usbInitialized) {
-        USBKeyboard.releaseAll();
-        USBKeyboard.end();
-        USBMouse.end();
+        if (usbKeyboardReady) { USBKeyboard.releaseAll(); USBKeyboard.end(); }
+        if (usbMouseReady)    { USBMouse.end(); }
         usbKeyboardReady = false;
         usbMouseReady    = false;
     }

@@ -86,10 +86,18 @@ BleComboMouse*    Mouse    = nullptr;
 
 USBHIDKeyboard USBKeyboard;
 USBHIDMouse    USBMouse;
-bool usbEnabled       = true;
-bool usbInitialized   = false;
-bool usbKeyboardReady = false;
-bool usbMouseReady    = false;
+bool usbEnabled         = true;
+bool usbInitialized     = false;
+bool usbKeyboardReady   = false;
+bool usbMouseReady      = false;
+bool usbKeyboardEnabled = true;
+bool usbMouseEnabled    = true;
+bool fido2Enabled       = false;
+
+bool bleKeyboardEnabled = true;
+bool bleMouseEnabled    = true;
+
+int maxSinkSize = 0; // 0 = unlimited
 
 String wifiSSID      = DEFAULT_WIFI_SSID;
 String wifiPassword  = DEFAULT_WIFI_PASSWORD;
@@ -199,6 +207,7 @@ void setup() {
     loadWifiEnabledSettings();
     loadApiKeySettings();
     loadUtcOffsetSettings();
+    loadSinkSettings();
     loadMTLSSettings();
     loadKeymapSettings();
     loadUSBSettings();

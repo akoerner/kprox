@@ -15,6 +15,8 @@ void handleSendText();
 void handleSendMouse();
 void handleSink();
 void handleFlush();
+void handleSinkSize();
+void handleSinkDelete();
 void handleBluetooth();
 void handleUSB();
 void handleDevice();

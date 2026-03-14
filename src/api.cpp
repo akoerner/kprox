@@ -12,6 +12,7 @@
 
 String currentNonce = "";
 
+
 // ---- Utilities ----
 
 static void addCorsHeaders() {
@@ -137,6 +138,28 @@ void handleNotFound() {
     server.client().stop();
 }
 
+static constexpr const char* SINK_FILE = "/sink.txt";
+
+static size_t sinkSize() {
+    if (!SPIFFS.exists(SINK_FILE)) return 0;
+    File f = SPIFFS.open(SINK_FILE, "r");
+    if (!f) return 0;
+    size_t sz = f.size();
+    f.close();
+    return sz;
+}
+
+static bool sinkAppend(const String& data) {
+    // Enforce max sink size
+    size_t cur = sinkSize();
+    if (maxSinkSize > 0 && cur + data.length() > (size_t)maxSinkSize) return false;
+    File f = SPIFFS.open(SINK_FILE, "a");
+    if (!f) return false;
+    f.print(data);
+    f.close();
+    return true;
+}
+
 // ---- Status ----
 
 void handleApiStatus() {
@@ -150,29 +173,36 @@ void handleApiStatus() {
     JsonDocument doc;
     doc["connected"] = hasAnyConnection();
 
-    JsonObject connections = doc.createNestedObject("connections");
-    JsonObject btObj = connections.createNestedObject("bluetooth");
-    btObj["enabled"]     = bluetoothEnabled;
-    btObj["initialized"] = bluetoothInitialized;
-    btObj["connected"]   = bleConn;
+    JsonObject connections = doc["connections"].to<JsonObject>();
+    JsonObject btObj = connections["bluetooth"].to<JsonObject>();
+    btObj["enabled"]         = bluetoothEnabled;
+    btObj["initialized"]     = bluetoothInitialized;
+    btObj["connected"]       = bleConn;
+    btObj["keyboard_enabled"] = bleKeyboardEnabled;
+    btObj["mouse_enabled"]   = bleMouseEnabled;
 
-    JsonObject wifiObj = connections.createNestedObject("wifi");
+    JsonObject wifiObj = connections["wifi"].to<JsonObject>();
     wifiObj["ssid"]      = wifiSSID;
     wifiObj["connected"] = (WiFi.status() == WL_CONNECTED);
     wifiObj["rssi"]      = WiFi.RSSI();
 
-    JsonObject usbObj = connections.createNestedObject("usb");
+    JsonObject usbObj = connections["usb"].to<JsonObject>();
 #ifdef BOARD_HAS_USB_HID
-    usbObj["supported"]      = true;
-    usbObj["enabled"]        = usbEnabled;
-    usbObj["initialized"]    = usbInitialized;
-    usbObj["connected"]      = usbConn;
-    usbObj["keyboard_ready"] = usbKeyboardReady;
-    usbObj["mouse_ready"]    = usbMouseReady;
+    usbObj["supported"]        = true;
+    usbObj["enabled"]          = usbEnabled;
+    usbObj["initialized"]      = usbInitialized;
+    usbObj["connected"]        = usbConn;
+    usbObj["keyboard_ready"]   = usbKeyboardReady;
+    usbObj["mouse_ready"]      = usbMouseReady;
+    usbObj["keyboard_enabled"] = usbKeyboardEnabled;
+    usbObj["mouse_enabled"]    = usbMouseEnabled;
+    usbObj["fido2_enabled"]    = fido2Enabled;
 #else
     usbObj["supported"] = false; usbObj["enabled"] = false;
     usbObj["initialized"] = false; usbObj["connected"] = false;
     usbObj["keyboard_ready"] = false; usbObj["mouse_ready"] = false;
+    usbObj["keyboard_enabled"] = false; usbObj["mouse_enabled"] = false;
+    usbObj["fido2_enabled"] = false;
 #endif
 
     doc["request_in_progress"] = requestInProgress;
@@ -193,6 +223,8 @@ void handleApiStatus() {
     doc["ledEnabled"]          = ledEnabled;
     doc["credStoreLocked"]     = credStoreLocked;
     doc["credStoreCount"]      = credStoreCount();
+    doc["sinkSize"]            = sinkSize();
+    doc["sinkMaxSize"]         = maxSinkSize;
     doc["ledColor"]["r"]       = ledColorR;
     doc["ledColor"]["g"]       = ledColorG;
     doc["ledColor"]["b"]       = ledColorB;
@@ -394,41 +426,47 @@ void handleSendMouse() {
 
 // ---- Sink ----
 
-static constexpr const char* SINK_FILE = "/sink.txt";
-
+// POST /api/sink — no HMAC required; accepts:
+//   • raw unstructured body (any Content-Type)
+//   • JSON {"text":"..."} body
+//   • encrypted body (X-Encrypted: 1) containing either of the above
+// GET /api/sink — requires HMAC; returns size + preview
 void handleSink() {
     addCorsHeaders();
     server.sendHeader("Connection", "close");
-    if (!checkApiKey()) return;
-    if (!canProceed()) return;
 
     if (server.method() == HTTP_GET) {
-        // Return current sink contents and size
-        size_t size = 0;
+        if (!checkApiKey()) return;
+        if (!canProceed()) return;
+        size_t sz = sinkSize();
         String preview = "";
-        if (SPIFFS.exists(SINK_FILE)) {
+        if (sz > 0) {
             File f = SPIFFS.open(SINK_FILE, "r");
-            if (f) { size = f.size(); preview = f.readString().substring(0, 120); f.close(); }
+            if (f) { preview = f.readString().substring(0, 120); f.close(); }
         }
         JsonDocument doc;
-        doc["size"]    = size;
+        doc["size"]    = sz;
         doc["preview"] = preview;
+        doc["max_size"] = maxSinkSize;
         String out; serializeJson(doc, out);
         sendEncrypted(200, out);
         server.client().stop(); requestComplete(); return;
     }
 
     if (server.method() != HTTP_POST) {
-        server.send(405, "application/json", "{\"error\":\"Use POST\"}");
-        server.client().stop(); requestComplete(); return;
+        server.send(405, "application/json", "{\"error\":\"Use GET or POST\"}");
+        server.client().stop(); return;
     }
 
-    // Accept both encrypted and plain text — append raw body to sink.txt
+    // POST: no HMAC check — sink is designed as a write-only accumulator
+    if (!canProceed()) return;
+
     String body = server.hasArg("plain") ? server.arg("plain") : "";
+
+    // Attempt decryption if flagged (falls through to raw if decryption fails)
     if (!body.isEmpty() && server.hasHeader("X-Encrypted") && server.header("X-Encrypted") == "1") {
         String dec = decryptRequest(body);
         if (!dec.isEmpty()) body = dec;
-        // If decryption fails, fall through with raw body (allows plain-text POST too)
     }
 
     if (body.isEmpty()) {
@@ -436,19 +474,28 @@ void handleSink() {
         server.client().stop(); requestComplete(); return;
     }
 
-    File f = SPIFFS.open(SINK_FILE, "a");
-    if (!f) {
-        server.send(500, "application/json", "{\"error\":\"SPIFFS write failed\"}");
+    // Try to parse as JSON {"text":"..."} — fall back to raw string if not JSON
+    String toAppend = body;
+    JsonDocument jdoc;
+    if (!deserializeJson(jdoc, body) && jdoc["text"].is<const char*>()) {
+        toAppend = jdoc["text"].as<String>();
+    }
+
+    if (!sinkAppend(toAppend)) {
+        server.send(413, "application/json", "{\"error\":\"Sink buffer full\"}");
         server.client().stop(); requestComplete(); return;
     }
-    f.print(body);
-    f.close();
 
-    sendEncrypted(200, "{\"status\":\"ok\"}");
+    JsonDocument resp;
+    resp["status"] = "ok";
+    resp["size"]   = sinkSize();
+    String out; serializeJson(resp, out);
+    server.send(200, "application/json", out);
     server.client().stop();
     requestComplete();
 }
 
+// POST /api/flush — HMAC required; flushes sink to HID and clears it
 void handleFlush() {
     addCorsHeaders();
     server.sendHeader("Connection", "close");
@@ -465,8 +512,40 @@ void handleFlush() {
     if (!content.isEmpty()) pendingTokenStrings.push_back(content);
 
     JsonDocument doc;
-    doc["status"] = "ok";
+    doc["status"]  = "ok";
     doc["flushed"] = content.length();
+    String out; serializeJson(doc, out);
+    sendEncrypted(200, out);
+    server.client().stop();
+    requestComplete();
+}
+
+// GET /api/sink_size — HMAC required; returns just the byte count
+void handleSinkSize() {
+    addCorsHeaders();
+    server.sendHeader("Connection", "close");
+    if (!checkApiKey()) return;
+    if (!canProceed()) return;
+    JsonDocument doc;
+    doc["size"]     = sinkSize();
+    doc["max_size"] = maxSinkSize;
+    String out; serializeJson(doc, out);
+    sendEncrypted(200, out);
+    server.client().stop();
+    requestComplete();
+}
+
+// POST /api/sink_delete — HMAC required; deletes sink without flushing
+void handleSinkDelete() {
+    addCorsHeaders();
+    server.sendHeader("Connection", "close");
+    if (!checkApiKey()) return;
+    if (!canProceed()) return;
+    size_t was = sinkSize();
+    if (SPIFFS.exists(SINK_FILE)) SPIFFS.remove(SINK_FILE);
+    JsonDocument doc;
+    doc["status"]  = "ok";
+    doc["deleted"] = was;
     String out; serializeJson(doc, out);
     sendEncrypted(200, out);
     server.client().stop();
@@ -719,6 +798,13 @@ void handleSettings() {
                 if (ledEnabled) setLED(bluetoothEnabled ? LED_COLOR_BT_ENABLE : LED_COLOR_BT_DISABLE, 500);
             }
         }
+        if (doc["bluetooth"].is<JsonObject>()) {
+            JsonObject bt = doc["bluetooth"];
+            bool changed = false;
+            if (bt.containsKey("keyboard_enabled")) { bleKeyboardEnabled = bt["keyboard_enabled"].as<bool>(); changed = true; }
+            if (bt.containsKey("mouse_enabled"))    { bleMouseEnabled    = bt["mouse_enabled"].as<bool>();    changed = true; }
+            if (changed) saveBtSettings();
+        }
 
         if (doc["led"].is<JsonObject>()) {
             JsonObject led = doc["led"];
@@ -762,11 +848,33 @@ void handleSettings() {
                     USB.manufacturerName(usbManufacturer.c_str());
                     USB.productName(usbProduct.c_str());
                     USB.serialNumber(USB_SERIAL_NUMBER);
-                    USB.begin(); USBKeyboard.begin(); USBMouse.begin();
-                    usbInitialized = true; usbKeyboardReady = true; usbMouseReady = true;
+                    if (fido2Enabled) FIDO2Device.begin();
+                    USB.begin();
+                    if (usbKeyboardEnabled) { USBKeyboard.begin(); usbKeyboardReady = true; }
+                    if (usbMouseEnabled)    { USBMouse.begin();    usbMouseReady    = true; }
+                    usbInitialized = true;
                 }
                 if (ledEnabled) setLED(usbEnabled ? LED_COLOR_USB_ENABLE : LED_COLOR_USB_DISABLE, 500);
             }
+        }
+        if (doc["usb"].is<JsonObject>()) {
+            JsonObject usb = doc["usb"];
+            bool changed = false;
+            if (usb.containsKey("keyboard_enabled")) {
+                usbKeyboardEnabled = usb["keyboard_enabled"].as<bool>();
+                usbKeyboardReady   = usbEnabled && usbInitialized && usbKeyboardEnabled;
+                changed = true;
+            }
+            if (usb.containsKey("mouse_enabled")) {
+                usbMouseEnabled = usb["mouse_enabled"].as<bool>();
+                usbMouseReady   = usbEnabled && usbInitialized && usbMouseEnabled;
+                changed = true;
+            }
+            if (usb.containsKey("fido2_enabled")) {
+                fido2Enabled = usb["fido2_enabled"].as<bool>();
+                changed = true;
+            }
+            if (changed) saveUSBSettings();
         }
 #endif
 
@@ -965,10 +1073,10 @@ void handleApiDiscovery() {
     doc["gateway"]          = WiFi.gatewayIP().toString();
     doc["subnet_mask"]      = WiFi.subnetMask().toString();
 
-    JsonObject services = doc.createNestedObject("services");
+    JsonObject services = doc["services"].to<JsonObject>();
     services["http"] = 80;
 
-    JsonObject caps = doc.createNestedObject("capabilities");
+    JsonObject caps = doc["capabilities"].to<JsonObject>();
     caps["hid"] = true; caps["keyboard"] = true; caps["mouse"] = true;
     caps["bluetooth"] = bluetoothEnabled;
 #ifdef BOARD_HAS_USB_HID
@@ -977,7 +1085,7 @@ void handleApiDiscovery() {
     caps["usb"] = false;
 #endif
 
-    JsonObject status = doc.createNestedObject("status");
+    JsonObject status = doc["status"].to<JsonObject>();
     status["bluetooth_connected"] = isBLEConnected();
 #ifdef BOARD_HAS_USB_HID
     status["usb_connected"] = isUSBConnected();
@@ -1364,10 +1472,12 @@ void setupRoutes() {
     server.on("/send/mouse",             HTTP_POST,    handleSendMouse);
     server.on("/api/sink",               HTTP_GET,     handleSink);
     server.on("/api/sink",               HTTP_POST,    handleSink);
+    server.on("/api/sink_size",          HTTP_GET,     handleSinkSize);
     server.on("/api/flush",              HTTP_POST,    handleFlush);
+    server.on("/api/sink_delete",        HTTP_POST,    handleSinkDelete);
 
     const char* opts[] = {
-        "/send/text", "/send/mouse", "/api/sink", "/api/flush", "/api/status", "/api/settings",
+        "/send/text", "/send/mouse", "/api/sink", "/api/sink_size", "/api/sink_delete", "/api/flush", "/api/status", "/api/settings",
         "/api/registers", "/api/led", "/api/bluetooth", "/api/usb",
         "/api/device", "/api/wifi", "/api/wipe-settings", "/api/wipe-everything",
         "/api/discovery", "/api/network", "/api/registers/export",

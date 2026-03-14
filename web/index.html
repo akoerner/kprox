@@ -149,6 +149,25 @@
                 </div>
 
                 <div class="status-item">
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <div class="status-label">Credential Store</div>
+                        <span id="globalCsLockBadge" style="display:inline-block;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:11px;background:#6c757d;color:#fff;">UNKNOWN</span>
+                    </div>
+                    <div style="font-size:11px;color:#6c757d;margin-top:2px;" id="globalCsCountLabel"></div>
+                </div>
+
+                <div class="status-item">
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <div class="status-label">Sink Buffer</div>
+                        <span id="globalSinkBadge" style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;background:#343a40;color:#adb5bd;">0 B</span>
+                    </div>
+                    <div style="display:flex;gap:4px;margin-top:4px;">
+                        <button onclick="sinkFlush()" style="flex:1;padding:3px 6px;font-size:11px;background:#198754;color:#fff;border:none;border-radius:3px;cursor:pointer;">Flush</button>
+                        <button onclick="sinkDelete()" style="flex:1;padding:3px 6px;font-size:11px;background:#dc3545;color:#fff;border:none;border-radius:3px;cursor:pointer;">Delete</button>
+                    </div>
+                </div>
+
+                <div class="status-item">
                     <div class="status-label">Request Status</div>
                     <div class="status-value" id="requestStatus">Idle</div>
                 </div>
@@ -165,11 +184,41 @@
 
                 <!-- Bluetooth Settings -->
                 <div class="bluetooth-settings">
-                    <div class="status-label">Bluetooth Settings</div>
+                    <div class="status-label">Bluetooth</div>
                     <button id="bluetoothToggle" class="bluetooth-toggle" onclick="toggleBluetooth()">Enable Bluetooth</button>
-                    <div class="bluetooth-status">
+                    <div class="bluetooth-status" style="margin-top:4px;">
                         <span class="status-label">Status:</span>
                         <span class="status-value" id="bluetoothStatus">Unknown</span>
+                    </div>
+                    <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;" id="bleSubControls">
+                        <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
+                            <input type="checkbox" id="bleKeyboardEnabled" onchange="setBleSubEnable('keyboard_enabled',this.checked)">
+                            BLE Keyboard
+                        </label>
+                        <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
+                            <input type="checkbox" id="bleMouseEnabled" onchange="setBleSubEnable('mouse_enabled',this.checked)">
+                            BLE Mouse
+                        </label>
+                    </div>
+                </div>
+
+                <!-- USB HID Settings -->
+                <div class="bluetooth-settings" style="margin-top:10px;">
+                    <div class="status-label">USB HID</div>
+                    <button id="usbToggle" class="bluetooth-toggle" onclick="toggleUSB()">Enable USB HID</button>
+                    <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;" id="usbSubControls">
+                        <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
+                            <input type="checkbox" id="usbKeyboardEnabled" onchange="setUsbSubEnable('keyboard_enabled',this.checked)">
+                            USB Keyboard
+                        </label>
+                        <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
+                            <input type="checkbox" id="usbMouseEnabled" onchange="setUsbSubEnable('mouse_enabled',this.checked)">
+                            USB Mouse
+                        </label>
+                        <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
+                            <input type="checkbox" id="fido2Enabled" onchange="setUsbSubEnable('fido2_enabled',this.checked)">
+                            FIDO2/CTAP2 (reboot)
+                        </label>
                     </div>
                 </div>
 
@@ -360,7 +409,13 @@
                        <div class="input-group">
                             <label>Text:</label>
                             <textarea id="textInput" placeholder="Hello, world{SLEEP 1000}{ENTER}"></textarea>
-                            <button onclick="sendText()">Send</button>
+                            <div style="display:flex;align-items:center;gap:10px;margin-top:6px;">
+                                <button onclick="sendText()">Send</button>
+                                <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;white-space:nowrap;">
+                                    <input type="checkbox" id="sendToSinkCheck">
+                                    Send to Sink
+                                </label>
+                            </div>
                         </div>
                         <div class="busy-indicator" id="textBusy">Sending text...</div>
                         <div class="response-box" id="textResponse"></div>

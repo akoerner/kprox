@@ -28,4 +28,7 @@ void saveLEDSettings();
 void saveKeymapSettings();
 void loadKeymapSettings();
 
+void saveSinkSettings();
+void loadSinkSettings();
+
 void wipeAllSettings();

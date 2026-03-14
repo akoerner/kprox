@@ -219,6 +219,7 @@ const keyReference = [
     {char: '', desc: 'Disable USB HID - Deactivates USB HID connectivity', ascii: 0, hid: 0, shift: false, token: '{USB_DISABLE}'},
     {char: '', desc: 'Halt Operations - Stops all script execution immediately', ascii: 0, hid: 0, shift: false, token: '{HALT}'},
     {char: '', desc: 'Resume Operations - Resumes halted script execution', ascii: 0, hid: 0, shift: false, token: '{RESUME}'},
+    {char: '', desc: 'SinkProx Flush - Flushes the sink buffer (/sink.txt) to HID output and clears it', ascii: 0, hid: 0, shift: false, token: '{SINKPROX}'},
     
     // ==== TIMING TOKENS ====
     {char: '', desc: 'Sleep/Delay - Pauses execution for specified milliseconds. Ex: {SLEEP 1000}', ascii: 0, hid: 0, shift: false, token: '{SLEEP ms}'},
@@ -1657,31 +1658,137 @@ async function loadWiFiSettings() {
 }
 
 async function toggleBluetooth() {
-    if (!isConnected) {
-        logDebug('Not connected - please connect first', 'warning');
-        return;
-    }
-
+    if (!isConnected) { logDebug('Not connected', 'warning'); return; }
     const endpoint = getApiEndpoint();
-    const payload = {
-        enabled: !bluetoothEnabled
-    };
-
     try {
         const response = await apiFetch(`${endpoint}/api/bluetooth`, {
             method: 'POST',
-            body: JSON.stringify(payload)
+            body: JSON.stringify({ enabled: !bluetoothEnabled })
         });
-
         if (response.ok) {
             bluetoothEnabled = !bluetoothEnabled;
             updateBluetoothUI();
             logDebug(`Bluetooth ${bluetoothEnabled ? 'enabled' : 'disabled'}`, 'success');
-        } else {
-            throw new Error(`HTTP ${response.status}`);
+        } else { throw new Error(`HTTP ${response.status}`); }
+    } catch (error) { logDebug(`Failed to toggle Bluetooth: ${error.message}`, 'error'); }
+}
+
+async function toggleUSB() {
+    if (!isConnected) { logDebug('Not connected', 'warning'); return; }
+    const endpoint = getApiEndpoint();
+    const curEnabled = document.getElementById('usbToggle')?.classList.contains('enabled') || false;
+    try {
+        const response = await apiFetch(`${endpoint}/api/usb`, {
+            method: 'POST',
+            body: JSON.stringify({ enabled: !curEnabled })
+        });
+        if (response.ok) {
+            const btn = document.getElementById('usbToggle');
+            if (btn) {
+                const nowEnabled = !curEnabled;
+                btn.textContent  = nowEnabled ? 'Disable USB HID' : 'Enable USB HID';
+                btn.classList.toggle('enabled', nowEnabled);
+            }
+            logDebug(`USB HID ${!curEnabled ? 'enabled' : 'disabled'}`, 'success');
+        } else { throw new Error(`HTTP ${response.status}`); }
+    } catch (error) { logDebug(`Failed to toggle USB: ${error.message}`, 'error'); }
+}
+
+async function setBleSubEnable(key, value) {
+    if (!isConnected) return;
+    const endpoint = getApiEndpoint();
+    try {
+        await apiFetch(`${endpoint}/api/settings`, {
+            method: 'POST',
+            body: JSON.stringify({ bluetooth: { [key]: value } })
+        });
+    } catch(e) { logDebug('BLE sub-enable error: ' + e.message, 'error'); }
+}
+
+async function setUsbSubEnable(key, value) {
+    if (!isConnected) return;
+    const endpoint = getApiEndpoint();
+    try {
+        await apiFetch(`${endpoint}/api/settings`, {
+            method: 'POST',
+            body: JSON.stringify({ usb: { [key]: value } })
+        });
+    } catch(e) { logDebug('USB sub-enable error: ' + e.message, 'error'); }
+}
+
+// ---- Sink management ----
+
+function updateSinkBadge(bytes) {
+    const badge = document.getElementById('globalSinkBadge');
+    if (!badge) return;
+    if (bytes > 0) {
+        badge.textContent = bytes + ' B';
+        badge.style.background = '#198754';
+        badge.style.color = '#fff';
+    } else {
+        badge.textContent = '0 B';
+        badge.style.background = '#343a40';
+        badge.style.color = '#adb5bd';
+    }
+}
+
+async function sinkFlush() {
+    if (!isConnected) { logDebug('Not connected', 'warning'); return; }
+    const endpoint = getApiEndpoint();
+    try {
+        const resp = await apiFetch(`${endpoint}/api/flush`, { method: 'POST', body: '{}' });
+        const data = await resp.json();
+        logDebug(`Flushed ${data.flushed || 0} bytes to HID`, 'success');
+        updateSinkBadge(0);
+    } catch(e) { logDebug('Flush error: ' + e.message, 'error'); }
+}
+
+async function sinkDelete() {
+    if (!isConnected) { logDebug('Not connected', 'warning'); return; }
+    if (!confirm('Delete sink buffer without flushing to HID?')) return;
+    const endpoint = getApiEndpoint();
+    try {
+        const resp = await apiFetch(`${endpoint}/api/sink_delete`, { method: 'POST', body: '{}' });
+        const data = await resp.json();
+        logDebug(`Deleted ${data.deleted || 0} bytes from sink`, 'success');
+        updateSinkBadge(0);
+    } catch(e) { logDebug('Sink delete error: ' + e.message, 'error'); }
+}
+
+function updateConnectivityUI(data) {
+    // BT
+    const btBtn = document.getElementById('bluetoothToggle');
+    const btStatus = document.getElementById('bluetoothStatus');
+    if (data.connections?.bluetooth) {
+        const bt = data.connections.bluetooth;
+        bluetoothEnabled = bt.enabled;
+        if (btBtn) {
+            btBtn.textContent = bt.enabled ? 'Disable Bluetooth' : 'Enable Bluetooth';
+            btBtn.classList.toggle('enabled', bt.enabled);
         }
-    } catch (error) {
-        logDebug(`Failed to toggle Bluetooth: ${error.message}`, 'error');
+        if (btStatus) {
+            btStatus.textContent = bt.connected ? 'Connected' : (bt.enabled ? 'No peer' : 'Disabled');
+            btStatus.className = 'status-value ' + (bt.connected ? 'connected' : 'disconnected');
+        }
+        const bleKb = document.getElementById('bleKeyboardEnabled');
+        const bleMo = document.getElementById('bleMouseEnabled');
+        if (bleKb) bleKb.checked = bt.keyboard_enabled !== false;
+        if (bleMo) bleMo.checked = bt.mouse_enabled    !== false;
+    }
+    // USB
+    if (data.connections?.usb) {
+        const usb = data.connections.usb;
+        const usbBtn = document.getElementById('usbToggle');
+        if (usbBtn) {
+            usbBtn.textContent = usb.enabled ? 'Disable USB HID' : 'Enable USB HID';
+            usbBtn.classList.toggle('enabled', usb.enabled);
+        }
+        const usbKb   = document.getElementById('usbKeyboardEnabled');
+        const usbMo   = document.getElementById('usbMouseEnabled');
+        const fido2El = document.getElementById('fido2Enabled');
+        if (usbKb)   usbKb.checked   = usb.keyboard_enabled !== false;
+        if (usbMo)   usbMo.checked   = usb.mouse_enabled    !== false;
+        if (fido2El) fido2El.checked = usb.fido2_enabled     === true;
     }
 }
 
@@ -2333,30 +2440,45 @@ function fuzzyRender(out) {
     }).join('');
 }
 
+function _fuzzyPopulateBox(vi) {
+    const r = _fuzzyResults[vi];
+    if (!r) return;
+    const inp = document.getElementById('fuzzySearchInput');
+    if (inp) inp.value = r.name || ('#' + r.idx);
+}
+
 function fuzzySelectRow(vi) {
     _fuzzySelectedIdx = vi;
+    _fuzzyPopulateBox(vi);
     fuzzyRender();
-    if (_fuzzyResults[vi]) {
-        const idx = _fuzzyResults[vi].idx;
-        if (idx === currentActiveRegister) fuzzyPlayIdx(idx);
-        else fuzzySetActive(idx);
-    }
+    if (!_fuzzyResults[vi]) return;
+    const { idx } = _fuzzyResults[vi];
+    if (idx === currentActiveRegister) fuzzyPlayIdx(idx);
+    else fuzzySetActive(idx);
 }
 
 function fuzzyKeydown(e) {
     if (e.key === 'ArrowDown') {
         e.preventDefault();
-        if (_fuzzySelectedIdx < _fuzzyResults.length - 1) { _fuzzySelectedIdx++; fuzzyRender(); }
+        if (_fuzzySelectedIdx < _fuzzyResults.length - 1) _fuzzySelectedIdx++;
+        _fuzzyPopulateBox(_fuzzySelectedIdx);
+        fuzzyRender();
     } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        if (_fuzzySelectedIdx > 0) { _fuzzySelectedIdx--; fuzzyRender(); }
+        if (_fuzzySelectedIdx > 0) _fuzzySelectedIdx--;
+        _fuzzyPopulateBox(_fuzzySelectedIdx);
+        fuzzyRender();
     } else if (e.key === 'Enter') {
         e.preventDefault();
         if (_fuzzyResults.length === 0) return;
-        const idx = _fuzzyResults[Math.max(0, _fuzzySelectedIdx)].idx;
+        const si = Math.max(0, _fuzzySelectedIdx);
+        const { idx } = _fuzzyResults[si];
+        _fuzzyPopulateBox(si);
+        fuzzyRender();
         if (idx === currentActiveRegister) fuzzyPlayIdx(idx);
         else fuzzySetActive(idx);
     }
+    // All other keys let oninput handle the re-search naturally
 }
 
 function fuzzySearchClear() {
@@ -2370,8 +2492,10 @@ async function fuzzySetActive(idx) {
     const success = await setActiveRegisterOnDevice(idx);
     if (success) {
         currentActiveRegister = idx;
+        const savedIdx = _fuzzySelectedIdx;
         await loadRegisters();
-        fuzzySearch();
+        _fuzzySelectedIdx = savedIdx; // restore — next Enter will play
+        fuzzyRender();
     }
 }
 
@@ -2531,8 +2655,8 @@ function populateRegisterList() {
                 <div class="register-number">${i + 1}</div>
                 <div class="register-active-indicator">${i === currentActiveRegister ? '*' : ''}</div>
                 <div class="register-reorder-buttons">
-                    <button class="reorder-btn" onclick="moveRegister(${i}, -1)" ${i === 0 ? 'disabled' : ''} title="Move up">?</button>
-                    <button class="reorder-btn" onclick="moveRegister(${i}, 1)" ${i === numRegisters - 1 ? 'disabled' : ''} title="Move down">?</button>
+                    <button class="reorder-btn" onclick="moveRegister(${i}, -1)" ${i === 0 ? 'disabled' : ''} title="Move up">Up</button>
+                    <button class="reorder-btn" onclick="moveRegister(${i}, 1)" ${i === numRegisters - 1 ? 'disabled' : ''} title="Move down">Dn</button>
                 </div>
             </div>
             <div class="register-name-container">
@@ -2548,7 +2672,7 @@ function populateRegisterList() {
                 <button class="register-button set-active-button" onclick="setActiveRegisterButton(${i})" ${i === currentActiveRegister ? 'disabled' : ''}>Set Active</button>
                 <button class="register-button play-button" onclick="playRegister(${i})">Play</button>
                 <button class="register-button save-button" onclick="saveRegister(${i})">Save</button>
-                <button class="register-button delete-button" onclick="deleteRegister(${i})">??</button>
+                <button class="register-button delete-button" onclick="deleteRegister(${i})">Del</button>
             </div>
             `;
 
@@ -3354,19 +3478,16 @@ async function connect() {
             updateWiFiStatus(data.connections.wifi);
         }
 
-        // Update Bluetooth status from nested structure
-        if (data.connections && data.connections.bluetooth) {
-            const bt = data.connections.bluetooth;
-            if (bt.hasOwnProperty('enabled')) {
-                bluetoothEnabled = bt.enabled;
+        // Update all connectivity toggles (BT + USB sub-enables + FIDO2)
+        if (data.connections) {
+            updateConnectivityUI(data);
+            // Keep old BT vars in sync for legacy code
+            if (data.connections.bluetooth) {
+                const bt = data.connections.bluetooth;
+                if (bt.hasOwnProperty('enabled'))     bluetoothEnabled     = bt.enabled;
+                if (bt.hasOwnProperty('initialized'))  bluetoothInitialized = bt.initialized;
+                if (bt.hasOwnProperty('connected'))    bluetoothConnected   = bt.connected;
             }
-            if (bt.hasOwnProperty('initialized')) {
-                bluetoothInitialized = bt.initialized;
-            }
-            if (bt.hasOwnProperty('connected')) {
-                bluetoothConnected = bt.connected;
-            }
-            updateBluetoothUI();
         }
 
         if (data.hasOwnProperty('halted')) {
@@ -3447,15 +3568,27 @@ async function connect() {
             await loadRegisters();
         }
 
-        // Update credstore lock badge
+        // Update credstore lock badge (tab + global sidebar)
         if (data.hasOwnProperty('credStoreLocked')) {
-            const badge = document.getElementById('credStoreLockBadge');
-            const count = document.getElementById('credStoreCountLabel');
-            if (badge) {
-                badge.textContent = data.credStoreLocked ? 'LOCKED' : 'UNLOCKED';
-                badge.style.background = data.credStoreLocked ? '#dc3545' : '#28a745';
-            }
-            if (count) count.textContent = `${data.credStoreCount || 0} credential${data.credStoreCount !== 1 ? 's' : ''}`;
+            const locked = data.credStoreLocked;
+            const countTxt = `${data.credStoreCount || 0} credential${data.credStoreCount !== 1 ? 's' : ''}`;
+            const bg    = locked ? '#dc3545' : '#28a745';
+            const label = locked ? 'LOCKED' : 'UNLOCKED';
+
+            const tabBadge  = document.getElementById('credStoreLockBadge');
+            const tabCount  = document.getElementById('credStoreCountLabel');
+            const globBadge = document.getElementById('globalCsLockBadge');
+            const globCount = document.getElementById('globalCsCountLabel');
+
+            if (tabBadge)  { tabBadge.textContent  = label; tabBadge.style.background  = bg; }
+            if (tabCount)  { tabCount.textContent   = countTxt; }
+            if (globBadge) { globBadge.textContent  = label; globBadge.style.background = bg; }
+            if (globCount) { globCount.textContent  = countTxt; }
+        }
+
+        // Update sink size badge from status (if device includes it)
+        if (data.hasOwnProperty('sinkSize')) {
+            updateSinkBadge(data.sinkSize);
         }
 
         logDebug('Connection successful', 'success');
@@ -3505,24 +3638,39 @@ async function sendTextToDevice(text) {
 }
 
 async function sendText() {
-    if (requestInProgress) {
-        logDebug('Request already in progress, please wait', 'warning');
-        return;
-    }
-
-    if (!isConnected) {
-        logDebug('Not connected - please connect first', 'warning');
-        return;
-    }
+    if (requestInProgress) { logDebug('Request already in progress', 'warning'); return; }
+    if (!isConnected)      { logDebug('Not connected', 'warning'); return; }
 
     const textInput = document.getElementById('textInput');
     if (!textInput) return;
+
+    const text = textInput.value;
+    const toSink = document.getElementById('sendToSinkCheck')?.checked || false;
+
+    if (toSink) {
+        // Route to sink endpoint — no batching needed, single POST
+        const endpoint = getApiEndpoint();
+        const responseBox = document.getElementById('textResponse');
+        showBusy('textBusy');
+        try {
+            const resp = await apiFetch(`${endpoint}/api/sink`, {
+                method: 'POST',
+                body: JSON.stringify({ text })
+            });
+            const data = await resp.json();
+            if (responseBox) responseBox.textContent = JSON.stringify(data);
+            logDebug(`Sent ${text.length} chars to sink (${data.size || '?'} bytes total)`, 'success');
+            updateSinkBadge(data.size || 0);
+        } catch(e) {
+            logDebug('Sink send error: ' + e.message, 'error');
+        } finally { hideBusy('textBusy'); }
+        return;
+    }
 
     requestInProgress = true;
     updateRequestStatus();
     showBusy('textBusy');
 
-    const text = textInput.value;
     const responseBox = document.getElementById('textResponse');
     const BATCH_SIZE = 100;
 
@@ -3538,9 +3686,7 @@ async function sendText() {
 
             if (!success) {
                 allBatchesSentSuccessfully = false;
-                if (responseBox) {
-                    responseBox.textContent = `Error: Failed to send text batch starting at index ${currentIndex}`;
-                }
+                if (responseBox) responseBox.textContent = `Error: Failed to send text batch starting at index ${currentIndex}`;
                 break;
             }
 
@@ -3549,19 +3695,15 @@ async function sendText() {
         }
 
         if (allBatchesSentSuccessfully) {
-            if (responseBox) {
-                responseBox.textContent = `Response: {"status":"ok", "message":"All text batches sent successfully"}`;
-            }
+            if (responseBox) responseBox.textContent = `Response: {"status":"ok", "message":"All text batches sent successfully"}`;
             logDebug('All text batches sent successfully', 'success');
         } else {
             logDebug('One or more text batches failed to send', 'error');
         }
 
     } catch (error) {
-        if (responseBox) {
-            responseBox.textContent = `Error: ${error.message}`;
-        }
-        logDebug(`An unexpected error occurred during text batch sending: ${error.message}`, 'error');
+        if (responseBox) responseBox.textContent = `Error: ${error.message}`;
+        logDebug(`An unexpected error occurred: ${error.message}`, 'error');
     } finally {
         requestInProgress = false;
         updateRequestStatus();

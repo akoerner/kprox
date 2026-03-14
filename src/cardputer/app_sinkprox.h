@@ -13,18 +13,18 @@ public:
     void onExit() override {}
     void requestRedraw() override { _needsRedraw = true; }
     const char* appName() const override { return "SinkProx"; }
-    uint16_t iconColor() const override  { return 0x04FF; } // teal
+    uint16_t iconColor() const override  { return 0x04FF; }
     bool handlesGlobalBtnA() const override { return true; }
 
 private:
-    bool          _needsRedraw = true;
-    bool          _flushing    = false;
+    bool          _needsRedraw  = true;
+    bool          _confirmDelete = false;
     String        _statusMsg;
-    bool          _statusOk    = false;
-    size_t        _sinkSize    = 0;
-    unsigned long _lastPoll    = 0;
+    bool          _statusOk     = false;
+    size_t        _sinkSize     = 0;
+    unsigned long _lastPoll     = 0;
 
-    static constexpr unsigned long POLL_MS  = 2000;
+    static constexpr unsigned long POLL_MS   = 2000;
     static constexpr const char*   SINK_FILE = "/sink.txt";
 
     unsigned long _lastBtnPress   = 0;
@@ -36,6 +36,7 @@ private:
 
     void _draw();
     void _doFlush();
+    void _doDelete();
     void _pollSize();
     void _checkBtnA();
 };

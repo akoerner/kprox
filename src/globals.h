@@ -64,8 +64,8 @@
 #  undef KEY_F12
 #endif
 
-#include "BleComboKeyboard.h"
-#include "BleComboMouse.h"
+#include "ble/BleComboKeyboard.h"
+#include "ble/BleComboMouse.h"
 
 #include "config.h"
 #include "constants.h"
@@ -75,6 +75,7 @@
 #  include "USB.h"
 #  include "USBHIDKeyboard.h"
 #  include "USBHIDMouse.h"
+#  include "ble/USBHIDFIDO2.h"
 #endif
 
 struct MouseBatch {
@@ -121,12 +122,17 @@ extern const char* deviceName;
 // ---- BLE / USB state ----
 extern bool bluetoothEnabled;
 extern bool bluetoothInitialized;
+extern bool bleKeyboardEnabled;    // BLE keyboard sub-enable (requires bluetoothEnabled)
+extern bool bleMouseEnabled;       // BLE mouse sub-enable (requires bluetoothEnabled)
 
 #ifdef BOARD_HAS_USB_HID
 extern bool usbEnabled;
 extern bool usbInitialized;
 extern bool usbKeyboardReady;
 extern bool usbMouseReady;
+extern bool usbKeyboardEnabled;    // USB keyboard sub-enable
+extern bool usbMouseEnabled;       // USB mouse sub-enable
+extern bool fido2Enabled;          // FIDO2/CTAP2 USB HID sub-enable
 #endif
 
 // ---- Network state ----
@@ -168,7 +174,8 @@ extern MouseBatch mouseBatch;
 extern int        currentMouseX;
 extern int        currentMouseY;
 
-// Set by haltAllOperations() to abort the current parser run immediately.
+// ---- Sink ----
+extern int maxSinkSize; // 0 = unlimited
 // Cleared at the start of putTokenString() before each new run.
 extern bool g_parserAbort;
 

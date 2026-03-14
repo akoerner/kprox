@@ -41,11 +41,19 @@ BleComboMouse    Mouse(&Keyboard);
 #ifdef BOARD_M5STACK_ATOMS3
 USBHIDKeyboard USBKeyboard;
 USBHIDMouse    USBMouse;
-bool usbEnabled      = true;
-bool usbInitialized  = false;
+bool usbEnabled       = true;
+bool usbInitialized   = false;
 bool usbKeyboardReady = false;
-bool usbMouseReady   = false;
+bool usbMouseReady    = false;
+bool usbKeyboardEnabled = true;
+bool usbMouseEnabled    = true;
+bool fido2Enabled       = false;
 #endif
+
+bool bleKeyboardEnabled = true;
+bool bleMouseEnabled    = true;
+
+int maxSinkSize = 0; // 0 = unlimited
 
 String wifiSSID      = DEFAULT_WIFI_SSID;
 String wifiPassword  = DEFAULT_WIFI_PASSWORD;
@@ -197,6 +205,7 @@ void setup() {
     loadWiFiSettings();
     loadApiKeySettings();
     loadUtcOffsetSettings();
+    loadSinkSettings();
     loadMTLSSettings();
     loadKeymapSettings();
 #ifdef BOARD_M5STACK_ATOMS3
@@ -219,10 +228,11 @@ void setup() {
         USB.manufacturerName(usbManufacturer.c_str());
         USB.productName(usbProduct.c_str());
         USB.serialNumber(USB_SERIAL_NUMBER);
-        USB.begin(); USBKeyboard.begin(); USBMouse.begin();
-        usbInitialized   = true;
-        usbKeyboardReady = true;
-        usbMouseReady    = true;
+        if (fido2Enabled) FIDO2Device.begin();
+        USB.begin();
+        if (usbKeyboardEnabled) { USBKeyboard.begin(); usbKeyboardReady = true; }
+        if (usbMouseEnabled)    { USBMouse.begin();    usbMouseReady    = true; }
+        usbInitialized = true;
     }
 #endif
 
