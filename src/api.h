@@ -13,6 +13,8 @@ void handleRegisters();
 void handleSettings();
 void handleSendText();
 void handleSendMouse();
+void handleSink();
+void handleFlush();
 void handleBluetooth();
 void handleUSB();
 void handleDevice();

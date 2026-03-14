@@ -367,6 +367,20 @@
                     </div>
 
                     <div class="section">
+                        <h3>Fuzzy Search</h3>
+                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+                            <input type="text" id="fuzzySearchInput"
+                                   placeholder="Type to fuzzy search registers…"
+                                   oninput="fuzzySearch()"
+                                   onkeydown="fuzzyKeydown(event)"
+                                   style="flex:1;padding:6px 10px;border:1px solid #dee2e6;border-radius:4px;font-size:13px;">
+                            <button onclick="fuzzyPlaySelected()" style="padding:6px 12px;font-size:12px;background:#198754;color:#fff;border:none;border-radius:4px;cursor:pointer;">Play</button>
+                            <button onclick="fuzzySearchClear()" style="padding:6px 12px;font-size:12px;">Clear</button>
+                        </div>
+                        <div id="fuzzyResults" style="margin-top:4px;max-height:220px;overflow-y:auto;border:1px solid #dee2e6;border-radius:4px;font-size:13px;"></div>
+                    </div>
+
+                    <div class="section">
                         <h3>Register Management</h3>
 
                         <div class="token-examples">

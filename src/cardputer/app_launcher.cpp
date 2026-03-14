@@ -103,7 +103,6 @@ void AppLauncher::_drawIcon(int appIndex, int screenX, bool selected) {
         disp.pushImage(drawX, iconY, iconSz, iconSz, icon);
     } else {
         uint16_t col = uiManager.apps()[appIdx]->iconColor();
-        if (selected) col = disp.color565(255, 200, 0);
         disp.fillRoundRect(drawX, iconY, iconSz, iconSz, 8, col);
 
         disp.setTextSize(selected ? 3 : 2);

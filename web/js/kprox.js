@@ -25,7 +25,7 @@ let trackpadPendingDx = 0;
 let trackpadPendingDy = 0;
 let ipAddress = null;
 
-// Mouse movement pipeline — separate from the main API queue to avoid latency from
+// Mouse movement pipeline -- separate from the main API queue to avoid latency from
 // nonce serialisation competing with keyboard/register requests.
 let _mouseNonce = null;
 let _mouseNonceFetching = false;
@@ -368,7 +368,7 @@ function getApiKey() {
 }
 
 
-// ---- Crypto (pure JS — no Web Crypto API, works on plain HTTP) ----
+// ---- Crypto (pure JS -- no Web Crypto API, works on plain HTTP) ----
 
 // aes-js: MIT License, Richard Moore
 (function(){
@@ -1271,7 +1271,7 @@ function decryptResponse(base64Text) {
     const ivHex     = iv.map(b => b.toString(16).padStart(2,'0')).join('');
     const cipherHex = ciphertext.map(b => b.toString(16).padStart(2,'0')).join('');
     const keyStr    = getApiKey();
-    // HMAC over raw bytes — compute using sha256 directly
+    // HMAC over raw bytes -- compute using sha256 directly
     let k = keyBytes.length > 64 ? sha256(keyBytes) : keyBytes.slice();
     while (k.length < 64) k.push(0);
     const ipad = k.map(b => b ^ 0x36);
@@ -1281,9 +1281,9 @@ function decryptResponse(base64Text) {
     const outer = sha256([...opad, ...inner]);
     let diff = 0;
     for (let i = 0; i < 32; i++) diff |= outer[i] ^ tag[i];
-    if (diff !== 0) throw new Error('HMAC verification failed — wrong API key');
+    if (diff !== 0) throw new Error('HMAC verification failed -- wrong API key');
 
-    // Decrypt CTR — counter starts at iv with byte 15 set to 1
+    // Decrypt CTR -- counter starts at iv with byte 15 set to 1
     const ctrIv = iv.slice();
     ctrIv[15] = (ctrIv[15] & 0xfe) | 0x01;
     const ctr = new aesjs.ModeOfOperation.ctr(keyBytes, new aesjs.Counter(ctrIv));
@@ -1315,7 +1315,7 @@ function hmacAuth(nonce) {
     return hmacSHA256hex(getApiKey(), nonce);
 }
 
-// Serialization queue — only one nonce/auth/request cycle at a time,
+// Serialization queue -- only one nonce/auth/request cycle at a time,
 // since the device holds a single currentNonce.
 let _apiQueue = Promise.resolve();
 
@@ -1364,7 +1364,7 @@ async function _apiFetchInner(url, options = {}) {
             data = JSON.parse(decryptResponse(text));
         } catch (e) {
             logDebug(`Decrypt error for ${url}: ${e.message}, encrypted header=${encrypted}, text[:40]=${text.substring(0,40)}`, 'error');
-            return { ok: false, status: 403, statusText: 'Forbidden', _data: { error: 'Decryption failed — API key may be incorrect' }, json: async () => ({ error: 'Decryption failed — API key may be incorrect' }), text: async () => text };
+            return { ok: false, status: 403, statusText: 'Forbidden', _data: { error: 'Decryption failed -- API key may be incorrect' }, json: async () => ({ error: 'Decryption failed -- API key may be incorrect' }), text: async () => text };
         }
     } else {
         try { data = JSON.parse(text); } catch (e) { logDebug(`JSON parse error for ${url}: ${e.message}, text[:80]=${text.substring(0,80)}`, 'error'); data = { error: text }; }
@@ -1627,7 +1627,7 @@ async function loadWiFiSettings() {
 
         if (response.ok) {
             const data = await response.json();
-            logDebug(`WiFi data — ${JSON.stringify(data).substring(0, 120)}`, 'info');
+            logDebug(`WiFi data -- ${JSON.stringify(data).substring(0, 120)}`, 'info');
             safeSetText('wifiSSID', data.ssid || '-');
             
             if (data.hasOwnProperty('connected')) {
@@ -1893,7 +1893,7 @@ function updateActiveRegisterUI() {
         const setActiveBtn = grid.querySelector('.set-active-button');
         if (index === currentActiveRegister) {
             grid.classList.add('active');
-            if (activeIndicator) activeIndicator.textContent = '●';
+            if (activeIndicator) activeIndicator.textContent = '*';
             if (setActiveBtn) setActiveBtn.disabled = true;
         } else {
             grid.classList.remove('active');
@@ -1965,14 +1965,24 @@ async function csRefresh() {
             } else if (!data.labels || data.labels.length === 0) {
                 list.innerHTML = '<em style="color:#6c757d;">No credentials stored yet.</em>';
             } else {
-                list.innerHTML = data.labels.map(lbl => `
-                    <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-bottom:1px solid #dee2e6;">
-                        <span style="font-family:monospace;font-weight:bold;">${escapeHtml(lbl)}</span>
-                        <div style="display:flex;gap:6px;">
-                            <button onclick="csPrefillEdit('${escapeHtml(lbl).replace(/'/g,"\\'")}\')" style="padding:3px 10px;font-size:11px;background:#0d6efd;">Edit</button>
-                            <button onclick="csDeleteCredential('${escapeHtml(lbl).replace(/'/g,"\\'")}\')" style="padding:3px 10px;font-size:11px;background:#dc3545;">Delete</button>
-                        </div>
-                    </div>`).join('');
+                list.innerHTML = `
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead><tr style="background:#f8f9fa;border-bottom:2px solid #dee2e6;">
+                            <th style="padding:6px 8px;text-align:left;">Label</th>
+                            <th style="padding:6px 8px;text-align:left;color:#6c757d;">Token Tag</th>
+                            <th style="padding:6px 8px;width:130px;"></th>
+                        </tr></thead>
+                        <tbody>${data.labels.map((lbl, li) => `
+                            <tr style="border-bottom:1px solid #dee2e6;">
+                                <td style="padding:6px 8px;font-family:monospace;font-weight:bold;">${escapeHtml(lbl)}</td>
+                                <td style="padding:6px 8px;font-family:monospace;color:#6c757d;font-size:11px;">{CREDSTORE ${escapeHtml(lbl)}}</td>
+                                <td style="padding:6px 8px;text-align:right;">
+                                    <button data-lbl="${escapeHtml(lbl)}" onclick="csPrefillEdit(this.dataset.lbl)" style="padding:3px 10px;font-size:11px;background:#0d6efd;margin-right:4px;">Edit</button>
+                                    <button data-lbl="${escapeHtml(lbl)}" onclick="csDeleteCredential(this.dataset.lbl)" style="padding:3px 10px;font-size:11px;background:#dc3545;">Delete</button>
+                                </td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>`;
             }
         }
     } catch(e) {
@@ -2126,8 +2136,22 @@ async function gadgetsFetch() {
     if (!list) return;
 
     btn.disabled = true;
-    if (status) status.textContent = 'Fetching…';
-    list.innerHTML = '<em style="color:#6c757d;">Loading gadgets from GitHub…</em>';
+    if (status) status.textContent = 'Fetching...';
+    list.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;padding:20px;color:#6c757d;">
+            <div style="width:20px;height:20px;border:3px solid #dee2e6;border-top-color:#0d6efd;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;"></div>
+            <span>Fetching gadgets from GitHub...</span>
+        </div>`;
+
+    // Ensure spin keyframe exists
+    if (!document.getElementById('spinStyle')) {
+        const s = document.createElement('style');
+        s.id = 'spinStyle';
+        s.textContent = '@keyframes spin{to{transform:rotate(360deg)}}';
+        document.head.appendChild(s);
+    }
+
+    let fetched = 0;
 
     try {
         const dirResp = await fetch(GADGETS_DIR_URL, {
@@ -2159,6 +2183,8 @@ async function gadgetsFetch() {
                     });
                 }
             } catch(_) { /* skip malformed */ }
+            fetched++;
+            if (status) status.textContent = `${fetched}/${jsonFiles.length} files...`;
         }
 
         _gadgetsCache = gadgets;
@@ -2208,7 +2234,7 @@ async function gadgetInstall(index) {
     const btn = document.getElementById(`gadgetInstallBtn_${index}`);
     const st  = document.getElementById(`gadgetStatus_${index}`);
     if (btn) btn.disabled = true;
-    if (st)  st.textContent = 'Installing…';
+    if (st)  st.textContent = 'Installing...';
     if (st)  st.style.color = '#6c757d';
 
     const endpoint = getApiEndpoint();
@@ -2218,7 +2244,7 @@ async function gadgetInstall(index) {
             body: JSON.stringify({ action: 'add', content: g.content, name: g.name })
         });
         if (resp.ok) {
-            if (st) { st.textContent = '✓ Installed as new register'; st.style.color = '#198754'; }
+            if (st) { st.textContent = 'v Installed as new register'; st.style.color = '#198754'; }
             await loadRegisters();
         } else {
             const data = await resp.json();
@@ -2229,6 +2255,141 @@ async function gadgetInstall(index) {
     } finally {
         if (btn) btn.disabled = false;
     }
+}
+
+// ---- Fuzzy Search ----
+
+let _fuzzySelectedIdx = -1;
+let _fuzzyResults = [];
+
+function fuzzyScore(hay, needle) {
+    if (!needle) return 0;
+    const h = hay.toLowerCase();
+    const n = needle.toLowerCase();
+    let hi = 0, ni = 0, score = 0, consec = 0;
+    while (hi < h.length && ni < n.length) {
+        if (h[hi] === n[ni]) { score += 1 + consec * 2; consec++; ni++; }
+        else consec = 0;
+        hi++;
+    }
+    return ni === n.length ? score : -1;
+}
+
+function fuzzySearch() {
+    const query = document.getElementById('fuzzySearchInput')?.value || '';
+    const out   = document.getElementById('fuzzyResults');
+    if (!out) return;
+
+    if (!isConnected || numRegisters === 0) {
+        out.innerHTML = '<div style="padding:8px;color:#6c757d;font-style:italic;">Connect to a device to search registers.</div>';
+        _fuzzyResults = [];
+        return;
+    }
+
+    const scored = [];
+    for (let i = 0; i < numRegisters; i++) {
+        const reg     = registers[i] || {};
+        const name    = reg.name    || '';
+        const content = reg.content || '';
+        const hay     = (name ? name + ' ' : '') + content;
+        const s       = fuzzyScore(hay, query);
+        if (!query || s >= 0) scored.push({ idx: i, score: query ? s : -i, name, content });
+    }
+    if (query) scored.sort((a, b) => b.score - a.score);
+
+    _fuzzyResults = scored.slice(0, 20);
+    if (_fuzzySelectedIdx >= _fuzzyResults.length) _fuzzySelectedIdx = _fuzzyResults.length - 1;
+    if (_fuzzyResults.length > 0 && _fuzzySelectedIdx < 0) _fuzzySelectedIdx = 0;
+
+    fuzzyRender(out);
+}
+
+function fuzzyRender(out) {
+    if (!out) out = document.getElementById('fuzzyResults');
+    if (!out) return;
+    if (_fuzzyResults.length === 0) {
+        out.innerHTML = '<div style="padding:8px;color:#6c757d;font-style:italic;">No matches.</div>';
+        return;
+    }
+    out.innerHTML = _fuzzyResults.map(({ idx, name, content }, vi) => {
+        const label    = name || (content.substring(0, 60) + (content.length > 60 ? '...' : ''));
+        const isActive = idx === currentActiveRegister;
+        const isSel    = vi === _fuzzySelectedIdx;
+        const rowBg    = isSel ? '#e8f0fe' : (isActive ? '#f0fff4' : '#fff');
+        const border   = isSel ? '#4285f4' : (isActive ? '#28a745' : '#dee2e6');
+        return `<div id="fuzzyRow_${vi}"
+                     style="display:flex;align-items:center;gap:8px;padding:5px 8px;
+                            background:${rowBg};border-bottom:1px solid ${border};cursor:pointer;"
+                     onclick="fuzzySelectRow(${vi})">
+                    <span style="color:#6c757d;font-size:11px;min-width:26px;">#${idx}</span>
+                    <span style="color:#28a745;font-size:11px;min-width:10px;">${isActive ? '*' : ''}</span>
+                    <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;"
+                          title="${escapeHtml(content)}">${escapeHtml(label)}</span>
+                    <button onclick="event.stopPropagation();fuzzyPlayIdx(${idx});"
+                            style="padding:2px 8px;font-size:11px;background:#198754;color:#fff;border:none;border-radius:3px;cursor:pointer;white-space:nowrap;">
+                        Play
+                    </button>
+                </div>`;
+    }).join('');
+}
+
+function fuzzySelectRow(vi) {
+    _fuzzySelectedIdx = vi;
+    fuzzyRender();
+    if (_fuzzyResults[vi]) {
+        const idx = _fuzzyResults[vi].idx;
+        if (idx === currentActiveRegister) fuzzyPlayIdx(idx);
+        else fuzzySetActive(idx);
+    }
+}
+
+function fuzzyKeydown(e) {
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (_fuzzySelectedIdx < _fuzzyResults.length - 1) { _fuzzySelectedIdx++; fuzzyRender(); }
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (_fuzzySelectedIdx > 0) { _fuzzySelectedIdx--; fuzzyRender(); }
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (_fuzzyResults.length === 0) return;
+        const idx = _fuzzyResults[Math.max(0, _fuzzySelectedIdx)].idx;
+        if (idx === currentActiveRegister) fuzzyPlayIdx(idx);
+        else fuzzySetActive(idx);
+    }
+}
+
+function fuzzySearchClear() {
+    const inp = document.getElementById('fuzzySearchInput');
+    if (inp) inp.value = '';
+    _fuzzySelectedIdx = -1;
+    fuzzySearch();
+}
+
+async function fuzzySetActive(idx) {
+    const success = await setActiveRegisterOnDevice(idx);
+    if (success) {
+        currentActiveRegister = idx;
+        await loadRegisters();
+        fuzzySearch();
+    }
+}
+
+async function fuzzyPlaySelected() {
+    if (_fuzzyResults.length === 0) return;
+    await fuzzyPlayIdx(_fuzzyResults[Math.max(0, _fuzzySelectedIdx)].idx);
+}
+
+async function fuzzyPlayIdx(idx) {
+    if (!isConnected) return;
+    const endpoint = getApiEndpoint();
+    try {
+        const resp = await apiFetch(`${endpoint}/api/registers`, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'play', register: idx })
+        });
+        if (!resp.ok) logDebug('Play failed: ' + resp.status, 'error');
+    } catch(e) { logDebug('Play error: ' + e.message, 'error'); }
 }
 
 function escapeHtml(str) {
@@ -2322,7 +2483,7 @@ async function loadRegisters() {
         }
 
         const data = await response.json();
-        logDebug(`Registers data — ${JSON.stringify(data).substring(0, 120)}`, 'success');
+        logDebug(`Registers data -- ${JSON.stringify(data).substring(0, 120)}`, 'success');
 
         currentActiveRegister = data.activeRegister;
 
@@ -2337,6 +2498,7 @@ async function loadRegisters() {
 
         updateActiveRegisterUI();
         populateRegisterList();
+        fuzzySearch(); // keep fuzzy results in sync
 
     } catch (error) {
         logDebug(`Failed to load registers: ${error.message}`, 'error');
@@ -2367,10 +2529,10 @@ function populateRegisterList() {
         grid.innerHTML = `
             <div class="register-header">
                 <div class="register-number">${i + 1}</div>
-                <div class="register-active-indicator">${i === currentActiveRegister ? '●' : ''}</div>
+                <div class="register-active-indicator">${i === currentActiveRegister ? '*' : ''}</div>
                 <div class="register-reorder-buttons">
-                    <button class="reorder-btn" onclick="moveRegister(${i}, -1)" ${i === 0 ? 'disabled' : ''} title="Move up">▲</button>
-                    <button class="reorder-btn" onclick="moveRegister(${i}, 1)" ${i === numRegisters - 1 ? 'disabled' : ''} title="Move down">▼</button>
+                    <button class="reorder-btn" onclick="moveRegister(${i}, -1)" ${i === 0 ? 'disabled' : ''} title="Move up">?</button>
+                    <button class="reorder-btn" onclick="moveRegister(${i}, 1)" ${i === numRegisters - 1 ? 'disabled' : ''} title="Move down">?</button>
                 </div>
             </div>
             <div class="register-name-container">
@@ -2386,7 +2548,7 @@ function populateRegisterList() {
                 <button class="register-button set-active-button" onclick="setActiveRegisterButton(${i})" ${i === currentActiveRegister ? 'disabled' : ''}>Set Active</button>
                 <button class="register-button play-button" onclick="playRegister(${i})">Play</button>
                 <button class="register-button save-button" onclick="saveRegister(${i})">Save</button>
-                <button class="register-button delete-button" onclick="deleteRegister(${i})">🗑️</button>
+                <button class="register-button delete-button" onclick="deleteRegister(${i})">??</button>
             </div>
             `;
 
@@ -2944,7 +3106,7 @@ async function _flushMouseMovementDirect() {
     _prefetchMouseNonce();
 }
 
-// requestAnimationFrame loop — runs every frame while the finger/pointer is down,
+// requestAnimationFrame loop -- runs every frame while the finger/pointer is down,
 // draining accumulated deltas as fast as the device can accept them.
 function _mouseRafLoop() {
     _flushMouseMovementDirect();
@@ -3179,7 +3341,7 @@ async function connect() {
         safeSetText('cpuFreq',    data.cpuFreq  ? `${data.cpuFreq} MHz` : '-');
         safeSetText('flashSize',  data.flashSize ? `${(data.flashSize / (1024 * 1024)).toFixed(0)} MB` : '-');
 
-        // IP — available directly on response and also nested under wifi
+        // IP -- available directly on response and also nested under wifi
         const ip = data.ip || (data.connections && data.connections.wifi && data.connections.wifi.ip) || '-';
         safeSetText('ipAddress', ip);
         if (ip !== '-') ipAddress = ip;
@@ -3600,7 +3762,7 @@ async function loadDeviceSettings() {
 
         if (response.ok) {
             const data = await response.json();
-            logDebug(`Device data — ${JSON.stringify(data).substring(0, 120)}`, 'info');
+            logDebug(`Device data -- ${JSON.stringify(data).substring(0, 120)}`, 'info');
             safeSetText('deviceManufacturer', data.manufacturer || '-');
             safeSetText('deviceProduct', data.product || '-');
         }
@@ -4016,7 +4178,7 @@ async function loadMTLSStatus() {
         if (certsEl) {
             const hasCerts = data.has_server_cert && data.has_server_key;
             certsEl.textContent = hasCerts
-                ? `Server cert ✓, Key ✓${data.has_ca_cert ? ', CA ✓' : ''}`
+                ? `Server cert v, Key v${data.has_ca_cert ? ', CA v' : ''}`
                 : 'No certificates';
         }
         if (toggle) toggle.checked = data.enabled;

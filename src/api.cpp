@@ -392,6 +392,87 @@ void handleSendMouse() {
     requestComplete();
 }
 
+// ---- Sink ----
+
+static constexpr const char* SINK_FILE = "/sink.txt";
+
+void handleSink() {
+    addCorsHeaders();
+    server.sendHeader("Connection", "close");
+    if (!checkApiKey()) return;
+    if (!canProceed()) return;
+
+    if (server.method() == HTTP_GET) {
+        // Return current sink contents and size
+        size_t size = 0;
+        String preview = "";
+        if (SPIFFS.exists(SINK_FILE)) {
+            File f = SPIFFS.open(SINK_FILE, "r");
+            if (f) { size = f.size(); preview = f.readString().substring(0, 120); f.close(); }
+        }
+        JsonDocument doc;
+        doc["size"]    = size;
+        doc["preview"] = preview;
+        String out; serializeJson(doc, out);
+        sendEncrypted(200, out);
+        server.client().stop(); requestComplete(); return;
+    }
+
+    if (server.method() != HTTP_POST) {
+        server.send(405, "application/json", "{\"error\":\"Use POST\"}");
+        server.client().stop(); requestComplete(); return;
+    }
+
+    // Accept both encrypted and plain text — append raw body to sink.txt
+    String body = server.hasArg("plain") ? server.arg("plain") : "";
+    if (!body.isEmpty() && server.hasHeader("X-Encrypted") && server.header("X-Encrypted") == "1") {
+        String dec = decryptRequest(body);
+        if (!dec.isEmpty()) body = dec;
+        // If decryption fails, fall through with raw body (allows plain-text POST too)
+    }
+
+    if (body.isEmpty()) {
+        server.send(400, "application/json", "{\"error\":\"Empty body\"}");
+        server.client().stop(); requestComplete(); return;
+    }
+
+    File f = SPIFFS.open(SINK_FILE, "a");
+    if (!f) {
+        server.send(500, "application/json", "{\"error\":\"SPIFFS write failed\"}");
+        server.client().stop(); requestComplete(); return;
+    }
+    f.print(body);
+    f.close();
+
+    sendEncrypted(200, "{\"status\":\"ok\"}");
+    server.client().stop();
+    requestComplete();
+}
+
+void handleFlush() {
+    addCorsHeaders();
+    server.sendHeader("Connection", "close");
+    if (!checkApiKey()) return;
+    if (!canProceed()) return;
+
+    String content = "";
+    if (SPIFFS.exists(SINK_FILE)) {
+        File f = SPIFFS.open(SINK_FILE, "r");
+        if (f) { content = f.readString(); f.close(); }
+        SPIFFS.remove(SINK_FILE);
+    }
+
+    if (!content.isEmpty()) pendingTokenStrings.push_back(content);
+
+    JsonDocument doc;
+    doc["status"] = "ok";
+    doc["flushed"] = content.length();
+    String out; serializeJson(doc, out);
+    sendEncrypted(200, out);
+    server.client().stop();
+    requestComplete();
+}
+
 // ---- Bluetooth ----
 
 void handleBluetooth() {
@@ -1281,9 +1362,12 @@ void setupRoutes() {
     server.on("/api/credstore/rekey",    HTTP_POST,    handleCredStoreKey);
     server.on("/send/text",              HTTP_POST,    handleSendText);
     server.on("/send/mouse",             HTTP_POST,    handleSendMouse);
+    server.on("/api/sink",               HTTP_GET,     handleSink);
+    server.on("/api/sink",               HTTP_POST,    handleSink);
+    server.on("/api/flush",              HTTP_POST,    handleFlush);
 
     const char* opts[] = {
-        "/send/text", "/send/mouse", "/api/status", "/api/settings",
+        "/send/text", "/send/mouse", "/api/sink", "/api/flush", "/api/status", "/api/settings",
         "/api/registers", "/api/led", "/api/bluetooth", "/api/usb",
         "/api/device", "/api/wifi", "/api/wipe-settings", "/api/wipe-everything",
         "/api/discovery", "/api/network", "/api/registers/export",

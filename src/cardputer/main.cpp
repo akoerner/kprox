@@ -20,6 +20,8 @@
 #include "app_credstore.h"
 #include "app_gadgets.h"
 #include "app_regedit.h"
+#include "app_fuzzyprox.h"
+#include "app_sinkprox.h"
 #include <M5Cardputer.h>
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -359,18 +361,22 @@ void setup() {
     // Register apps: Launcher first, then real apps in display order
     static Cardputer::AppLauncher    launcher;
     static Cardputer::AppKProx       appKProx;
+    static Cardputer::AppFuzzyProx   appFuzzyProx;
     static Cardputer::AppRegEdit     appRegEdit;
     static Cardputer::AppCredStore   appCredStore;
     static Cardputer::AppGadgets     appGadgets;
+    static Cardputer::AppSinkProx    appSinkProx;
     static Cardputer::AppKeyboardHID appKeyboard;
     static Cardputer::AppClock       appClock;
     static Cardputer::AppSettings    appSettings;
 
     Cardputer::uiManager.addApp(&launcher);
     Cardputer::uiManager.addApp(&appKProx);
+    Cardputer::uiManager.addApp(&appFuzzyProx);
     Cardputer::uiManager.addApp(&appRegEdit);
     Cardputer::uiManager.addApp(&appCredStore);
     Cardputer::uiManager.addApp(&appGadgets);
+    Cardputer::uiManager.addApp(&appSinkProx);
     Cardputer::uiManager.addApp(&appKeyboard);
     Cardputer::uiManager.addApp(&appClock);
     Cardputer::uiManager.addApp(&appSettings);
