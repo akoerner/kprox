@@ -87,6 +87,14 @@ async function build() {
             console.log('ℹ kprox.png not found in web/, skipping');
         }
 
+        // Copy TOKEN_REFERENCE.md to data/ so it is served via /api/docs
+        try {
+            await fs.copyFile('TOKEN_REFERENCE.md', path.join(dataDir, 'TOKEN_REFERENCE.md'));
+            console.log('✓ TOKEN_REFERENCE.md copied to data/');
+        } catch {
+            console.log('ℹ TOKEN_REFERENCE.md not found, skipping');
+        }
+
         const originalHtmlSize = (await fs.stat(path.join(webDir, 'index.html'))).size;
         const originalCssSize  = (await fs.stat(path.join(webDir, 'css', 'kprox.css'))).size;
         const originalJsSize   = (await fs.stat(path.join(webDir, 'js', 'kprox.js'))).size;

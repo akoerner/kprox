@@ -230,6 +230,7 @@ void setup() {
         USB.serialNumber(USB_SERIAL_NUMBER);
         if (fido2Enabled) FIDO2Device.begin();
         USB.begin();
+        KProxConsumer.begin();  // creates send semaphore; addDevice() ran in constructor
         if (usbKeyboardEnabled) { USBKeyboard.begin(); usbKeyboardReady = true; }
         if (usbMouseEnabled)    { USBMouse.begin();    usbMouseReady    = true; }
         usbInitialized = true;
@@ -239,7 +240,7 @@ void setup() {
     delay(500);
     if (bluetoothEnabled) Keyboard.releaseAll();
 #ifdef BOARD_M5STACK_ATOMS3
-    if (usbEnabled && usbInitialized) USBKeyboard.releaseAll();
+    if (usbEnabled && usbInitialized) { if (usbKeyboardReady) USBKeyboard.releaseAll(); if (KProxConsumer.isReady()) { KProxConsumer.sendConsumer(0,0); KProxConsumer.sendSystem(0); } }
 #endif
     feedWatchdog();
 

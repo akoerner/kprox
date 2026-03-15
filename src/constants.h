@@ -152,6 +152,52 @@ typedef struct { uint8_t r, g, b; } LEDColor;
 #endif
 #define KEY_ESC KEY_ESCAPE
 
+// ---- Extended key constants (Arduino HID library encoding: 136 + HID_usage) ----
+// BleComboKeyboard.h already defines KEY_CAPS_LOCK=0xC1 and KEY_F1-F24=0xC2-0xFB as
+// const uint8_t values using this same encoding. We add the keys it omits. These values
+// work identically for both BLE (BleComboKeyboard::press) and USB (USBHIDKeyboard::press).
+//
+// Encoding: press(k) with k>=136 sends HID usage (k-136). With k<136 the value is
+// treated as ASCII and run through _asciimap — which is why raw HID usages (0x39 etc.)
+// produced wrong or no output.
+
+// KEY_CAPS_LOCK (0xC1) is already defined in BleComboKeyboard.h — do not redefine.
+
+#ifndef KEY_SCROLL_LOCK
+#  define KEY_SCROLL_LOCK   0xCF   // HID usage 0x47
+#endif
+#ifndef KEY_PAUSE
+#  define KEY_PAUSE         0xD0   // HID usage 0x48
+#endif
+#ifndef KEY_NUM_LOCK
+#  define KEY_NUM_LOCK      0xDB   // HID usage 0x53
+#endif
+#ifndef KEY_APPLICATION
+#  define KEY_APPLICATION   0xED   // HID usage 0x65
+#endif
+
+// Numpad (all encoded as 136 + HID usage)
+#ifndef KEY_KP_DIVIDE
+#  define KEY_KP_DIVIDE     0xDC   // HID 0x54
+#  define KEY_KP_MULTIPLY   0xDD   // HID 0x55
+#  define KEY_KP_MINUS      0xDE   // HID 0x56
+#  define KEY_KP_PLUS       0xDF   // HID 0x57
+#  define KEY_KP_ENTER      0xE0   // HID 0x58
+#  define KEY_KP1           0xE1   // HID 0x59
+#  define KEY_KP2           0xE2   // HID 0x5A
+#  define KEY_KP3           0xE3   // HID 0x5B
+#  define KEY_KP4           0xE4   // HID 0x5C
+#  define KEY_KP5           0xE5   // HID 0x5D
+#  define KEY_KP6           0xE6   // HID 0x5E
+#  define KEY_KP7           0xE7   // HID 0x5F
+#  define KEY_KP8           0xE8   // HID 0x60
+#  define KEY_KP9           0xE9   // HID 0x61
+#  define KEY_KP0           0xEA   // HID 0x62
+#  define KEY_KP_DOT        0xEB   // HID 0x63
+#endif
+
+// F13-F24 are already defined in BleComboKeyboard.h as 0xF0-0xFB. Do not redefine.
+
 // ---- Timing constants (ms) ----
 #define KEY_PRESS_DELAY          25
 #define KEY_RELEASE_DELAY        15

@@ -32,6 +32,7 @@ void handleApiDiscovery();
 void handleApiNetwork();
 void handleMTLS();
 void handleMTLSCerts();
+void handleDocs();
 void handleKeymap();
 void handleCredStore();
 void handleCredStoreKey();

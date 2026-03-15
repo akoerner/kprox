@@ -388,6 +388,7 @@
                     <div class="tab" onclick="showTab('reference')">Code Reference</div>
                     <div class="tab" onclick="showTab('credstore')">Credential Store</div>
                     <div class="tab" onclick="showTab('gadgets')">Gadgets</div>
+                    <div class="tab" onclick="showTab('keymap')">Keymap Editor</div>
                 </div>
 
                 <div id="registers-tab" class="tab-content active">
@@ -454,60 +455,82 @@
                                     <li><strong>LED Feedback:</strong> The LED blinks to indicate the current active register number</li>
                                 </ul>
 
-                                <h4>Special Key Tokens</h4>
+                                <p style="font-size:12px;color:#6c757d;margin:0 0 10px 0;">
+                                    <strong>Transport:</strong>
+                                    <span style="background:#d4edda;color:#155724;padding:1px 5px;border-radius:3px;font-size:11px;margin-left:4px;">BLE+USB</span> both &nbsp;
+                                    <span style="background:#cce5ff;color:#004085;padding:1px 5px;border-radius:3px;font-size:11px;">BLE only</span> &nbsp;
+                                    <span style="background:#fff3cd;color:#856404;padding:1px 5px;border-radius:3px;font-size:11px;">—</span> no HID output
+                                </p>
+
+                                <h4>Key Token Arguments <span style="font-size:11px;font-weight:normal;background:#d4edda;color:#155724;padding:1px 5px;border-radius:3px;">BLE+USB</span></h4>
                                 <ul>
-                                    <li>{ENTER} - Press Enter key</li>
-                                    <li>{TAB} - Press Tab key</li>
-                                    <li>{ESC} or {ESCAPE} - Press Escape key</li>
-                                    <li>{SPACE} - Press Space key</li>
-                                    <li>{BACKSPACE} - Press Backspace key</li>
-                                    <li>{DELETE} - Press Delete key</li>
+                                    <li><code>{KEY}</code> — tap (press + release immediately)</li>
+                                    <li><code>{KEY ms}</code> — hold for <em>ms</em> milliseconds e.g. <code>{ENTER 1000}</code></li>
+                                    <li><code>{KEY press}</code> — press down only, no auto-release</li>
+                                    <li><code>{KEY release}</code> — release only (use after press)</li>
+                                    <li><em>Example: {SHIFT press}{a}{b}{c}{SHIFT release} — types ABC</em></li>
                                 </ul>
 
-                                <h4>Arrow Keys</h4>
+                                <h4>Basic Keys <span style="font-size:11px;font-weight:normal;background:#d4edda;color:#155724;padding:1px 5px;border-radius:3px;">BLE+USB</span></h4>
                                 <ul>
-                                    <li>{LEFT} - Press Left Arrow key</li>
-                                    <li>{RIGHT} - Press Right Arrow key</li>
-                                    <li>{UP} - Press Up Arrow key</li>
-                                    <li>{DOWN} - Press Down Arrow key</li>
+                                    <li>{ENTER} / {RETURN} &nbsp; {TAB} &nbsp; {ESC} / {ESCAPE} &nbsp; {SPACE}</li>
+                                    <li>{BACKSPACE} / {BKSP} &nbsp; {DELETE} / {DEL} &nbsp; {INSERT}</li>
+                                    <li>{LEFT} {RIGHT} {UP} {DOWN} &nbsp; {HOME} {END} {PAGEUP} {PAGEDOWN}</li>
+                                    <li>{PRINTSCREEN} / {PRTSC} / {SYSRQ} &nbsp; {APPLICATION} / {MENU} / {APP}</li>
                                 </ul>
 
-                                <h4>Navigation Keys</h4>
+                                <h4>Modifier Keys <span style="font-size:11px;font-weight:normal;background:#d4edda;color:#155724;padding:1px 5px;border-radius:3px;">BLE+USB</span></h4>
                                 <ul>
-                                    <li>{INSERT} - Press Insert key</li>
-                                    <li>{HOME} - Press Home key</li>
-                                    <li>{END} - Press End key</li>
-                                    <li>{PAGEUP} - Press Page Up key</li>
-                                    <li>{PAGEDOWN} - Press Page Down key</li>
-                                    <li>{PRINTSCREEN} - Press Print Screen key</li>
-                                    <li>{SYSRQ} - Press System Request key (same as Print Screen)</li>
+                                    <li>{GUI} / {MOD} / {WIN} / {CMD} / {SUPER} / {WINDOWS} — all aliases</li>
+                                    <li>{CTRL} / {LCTRL} &nbsp; {RCTRL} &nbsp; {ALT} / {LALT} &nbsp; {RALT} / {ALTGR}</li>
+                                    <li>{SHIFT} / {LSHIFT} &nbsp; {RSHIFT}</li>
+                                </ul>
+
+                                <h4>Lock / Toggle Keys <span style="font-size:11px;font-weight:normal;background:#d4edda;color:#155724;padding:1px 5px;border-radius:3px;">BLE+USB</span></h4>
+                                <ul>
+                                    <li>{CAPSLOCK} / {CAPS} &nbsp; {NUMLOCK} &nbsp; {SCROLLLOCK} / {SCRLK} &nbsp; {PAUSE} / {PAUSEBREAK}</li>
                                 </ul>
 
                                 <h4>Function Keys</h4>
                                 <ul>
-                                    <li>{F1} - Press F1 key</li>
-                                    <li>{F2} - Press F2 key</li>
-                                    <li>{F3} - Press F3 key</li>
-                                    <li>{F4} - Press F4 key</li>
-                                    <li>{F5} - Press F5 key</li>
-                                    <li>{F6} - Press F6 key</li>
-                                    <li>{F7} - Press F7 key</li>
-                                    <li>{F8} - Press F8 key</li>
-                                    <li>{F9} - Press F9 key</li>
-                                    <li>{F10} - Press F10 key</li>
-                                    <li>{F11} - Press F11 key</li>
-                                    <li>{F12} - Press F12 key</li>
+                                    <li>{F1}–{F12} <span style="background:#d4edda;color:#155724;padding:1px 4px;border-radius:3px;font-size:10px;">BLE+USB</span></li>
+                                    <li>{F13}–{F24} <span style="background:#cce5ff;color:#004085;padding:1px 4px;border-radius:3px;font-size:10px;">BLE only</span> (USB host support varies)</li>
                                 </ul>
 
-                                <h4>System Control Tokens</h4>
+                                <h4>Numpad Keys <span style="font-size:11px;font-weight:normal;background:#d4edda;color:#155724;padding:1px 5px;border-radius:3px;">BLE+USB</span></h4>
                                 <ul>
-                                    <li>{BLUETOOTH_ENABLE} - Enable Bluetooth connectivity</li>
-                                    <li>{BLUETOOTH_DISABLE} - Disable Bluetooth connectivity</li>
-                                    <li>{USB_ENABLE} - Enable USB connectivity</li>
-                                    <li>{USB_DISABLE} - Disable USB connectivity</li>
-                                    <li>{HALT} - Halt all operations immediately</li>
-                                    <li>{RESUME} - Resume halted operations</li>
-                                    <li>{WIFI ssid password} - Connect to WiFi network</li>
+                                    <li>{KP0}–{KP9} &nbsp; {KPENTER} &nbsp; {KPPLUS} &nbsp; {KPMINUS} &nbsp; {KPMULTIPLY}/{KPSTAR}</li>
+                                    <li>{KPDIVIDE}/{KPSLASH} &nbsp; {KPDOT}/{KPDECIMAL}</li>
+                                </ul>
+
+                                <h4>Media / Consumer Keys <span style="font-size:11px;font-weight:normal;background:#d4edda;color:#155724;padding:1px 5px;border-radius:3px;">BLE+USB</span></h4>
+                                <p style="font-size:12px;color:#6c757d;margin:2px 0 6px;">HID Consumer Control report. No press/release/hold args. Produces correct kernel events (KEY_PLAYPAUSE etc.) visible in evtest.</p>
+                                <ul>
+                                    <li>{MUTE} &nbsp; {VOLUMEUP}/{VOLUP} &nbsp; {VOLUMEDOWN}/{VOLDOWN}</li>
+                                    <li>{PLAYPAUSE} &nbsp; {NEXTTRACK}/{NEXT} &nbsp; {PREVTRACK}/{PREV} &nbsp; {STOPTRACK}/{STOP}</li>
+                                    <li>{CALCULATOR}/{CALC} &nbsp; {EMAIL} &nbsp; {MYCOMPUTER} &nbsp; {WWWHOME}/{BROWSER}</li>
+                                    <li>{WWWSEARCH} &nbsp; {WWWBACK} &nbsp; {WWWSTOP} &nbsp; {BOOKMARKS} &nbsp; {MEDIASEL}</li>
+                                </ul>
+
+                                <h4>System Power / Sleep Keys <span style="font-size:11px;font-weight:normal;background:#d4edda;color:#155724;padding:1px 5px;border-radius:3px;">BLE+USB</span></h4>
+                                <p style="font-size:12px;color:#6c757d;margin:2px 0 6px;">HID Generic Desktop / System Control report. No press/release/hold args.</p>
+                                <ul>
+                                    <li>{SYSTEMPOWER} / {SYSPOWER} / {POWERDOWN} — power down</li>
+                                    <li>{SYSTEMSLEEP} / {SYSSLEEP} — sleep</li>
+                                    <li>{SYSTEMWAKE} / {SYSWAKE} / {WAKEUP} — wake up</li>
+                                </ul>
+
+                                <h4>RELEASEALL <span style="font-size:11px;font-weight:normal;background:#d4edda;color:#155724;padding:1px 5px;border-radius:3px;">BLE+USB</span></h4>
+                                <ul>
+                                    <li>{RELEASEALL} — immediately sends zeroed keyboard + consumer + system reports, releasing all held keys</li>
+                                </ul>
+
+                                <h4>System / Device Control <span style="font-size:11px;font-weight:normal;background:#fff3cd;color:#856404;padding:1px 5px;border-radius:3px;">— no HID output</span></h4>
+                                <ul>
+                                    <li>{HALT} — stop all execution &nbsp; {RESUME} — resume</li>
+                                    <li>{BLUETOOTH_ENABLE} / {BLUETOOTH_DISABLE} &nbsp; {USB_ENABLE} / {USB_DISABLE}</li>
+                                    <li>{WIFI ssid password} — connect to WiFi</li>
+                                    <li>{SINKPROX} — flush and execute the SinkProx buffer</li>
                                 </ul>
 
                                 <h4>Timing Tokens</h4>
@@ -544,7 +567,11 @@
                                     <li>{CHORD SHIFT+F10} - Shift + Function key</li>
                                     <li>{CHORD GUI+R} - Windows+R (Run dialog)</li>
                                     <li>{CHORD CTRL+SHIFT+N} - Ctrl+Shift+N (New incognito window)</li>
-                                    <li><em>CHORD supports any combination of CTRL, ALT, SHIFT, GUI with any key</em></li>
+                                    <li>{CHORD MOD+L} — lock screen (MOD/GUI/WIN/CMD/SUPER all alias the GUI key)</li>
+                                    <li>{CHORD RALT+E} — AltGr+E (€ on European layouts)</li>
+                                    <li>{CHORD GUI+SPACE} — Spotlight (macOS) / launcher</li>
+                                    <li><em>Full modifier alias list: CTRL/LCTRL/RCTRL · ALT/LALT/RALT/ALTGR · SHIFT/LSHIFT/RSHIFT · GUI/MOD/WIN/CMD/SUPER/WINDOWS</em></li>
+                                    <li><em>{CHORD} works on <span style="background:#d4edda;color:#155724;padding:1px 4px;border-radius:3px;font-size:10px;">BLE+USB</span></em></li>
                                 </ul>
 
                                 <h4>Raw HID Control Tokens</h4>
@@ -710,24 +737,37 @@
                 <div id="reference-tab" class="tab-content">
                     <div class="section">
                         <h3>Code Reference</h3>
-                        <input type="text" id="searchBox" class="search-box" placeholder="Search by character, ASCII, or HID code..." onkeyup="filterTable()">
-                        <table class="reference-table" id="referenceTable">
-                            <thead>
-                                <tr>
-                                    <th>Character</th>
-                                    <th>Description</th>
-                                    <th>ASCII Dec</th>
-                                    <th>ASCII Hex</th>
-                                    <th>HID Dec</th>
-                                    <th>HID Hex</th>
-                                    <th>Shift Required</th>
-                                    <th>Token</th>
-                                </tr>
-                            </thead>
-                            <tbody id="referenceTableBody">
-                                <!-- Table is dynamically generated -->
-                            </tbody>
-                        </table>
+                        <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap;">
+                            <input type="text" id="searchBox" class="search-box" placeholder="Search tokens, keys, descriptions..." oninput="refSearch()" style="flex:1;min-width:200px;">
+                            <div style="display:flex;gap:4px;">
+                                <button onclick="refSetView('doc')"  id="refBtnDoc"  style="font-size:12px;padding:3px 10px;">Token Reference</button>
+                                <button onclick="refSetView('char')" id="refBtnChar" style="font-size:12px;padding:3px 10px;background:#6c757d;color:#fff;">Char Table</button>
+                            </div>
+                        </div>
+
+                        <!-- Token reference docs (loaded from TOKEN_REFERENCE.md) -->
+                        <div id="refDocView">
+                            <div id="refDocContent" style="font-size:13px;line-height:1.6;"></div>
+                        </div>
+
+                        <!-- Character/HID lookup table -->
+                        <div id="refCharView" style="display:none;">
+                            <table class="reference-table" id="referenceTable">
+                                <thead>
+                                    <tr>
+                                        <th>Character</th>
+                                        <th>Description</th>
+                                        <th>ASCII Dec</th>
+                                        <th>ASCII Hex</th>
+                                        <th>HID Dec</th>
+                                        <th>HID Hex</th>
+                                        <th>Shift</th>
+                                        <th>Token</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="referenceTableBody"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
@@ -829,6 +869,104 @@
                         <div id="gadgetsList" style="font-size:13px;color:#6c757d;font-style:italic;">
                             Click "Load Gadgets from GitHub" to fetch available gadgets.
                         </div>
+                    </div>
+                </div>
+                <div id="keymap-tab" class="tab-content">
+                    <div class="section">
+                        <h3>Keymap Editor</h3>
+                        <p style="font-size:13px;color:#6c757d;margin-bottom:14px;">
+                            Custom keymaps remap characters to different HID key + modifier combinations, enabling correct
+                            typing on non-English keyboard layouts. The active keymap applies to all plain text output.
+                            The built-in <code>en</code> layout cannot be modified or deleted.
+                        </p>
+
+                        <!-- Keymap selector row -->
+                        <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap;">
+                            <select id="keymapSelect" style="flex:1;min-width:140px;" onchange="keymapSelected()">
+                                <option value="">-- select keymap --</option>
+                            </select>
+                            <button onclick="keymapSetActive()" title="Set as active keymap">✅ Set Active</button>
+                            <button onclick="keymapDeleteSelected()" id="keymapDeleteBtn" title="Delete selected keymap" style="background:#dc3545;color:#fff;">🗑 Delete</button>
+                        </div>
+
+                        <!-- Active keymap badge -->
+                        <div id="keymapActiveBadge" style="font-size:12px;color:#6c757d;margin-bottom:12px;"></div>
+
+                        <!-- New keymap creation -->
+                        <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap;">
+                            <input type="text" id="keymapNewId" placeholder="new-keymap-id (a-z, 0-9, -)" style="flex:1;min-width:160px;" maxlength="32">
+                            <button onclick="keymapCreate()">+ New</button>
+                            <label style="font-size:13px;cursor:pointer;padding:4px 8px;border:1px solid #ced4da;border-radius:4px;background:#f8f9fa;">
+                                📂 Upload JSON
+                                <input type="file" id="keymapFileInput" accept=".json" style="display:none;" onchange="keymapUploadFile()">
+                            </label>
+                        </div>
+
+                        <div id="keymapStatus" style="font-size:12px;margin-bottom:10px;min-height:16px;"></div>
+
+                        <!-- Editor area — shown when a keymap is selected -->
+                        <div id="keymapEditorArea" style="display:none;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                                <strong id="keymapEditorTitle" style="font-size:13px;"></strong>
+                                <div style="display:flex;gap:6px;">
+                                    <button onclick="keymapSave()" style="background:#198754;color:#fff;">💾 Save</button>
+                                    <button onclick="keymapDownload()" style="background:#0d6efd;color:#fff;">⬇ Download</button>
+                                </div>
+                            </div>
+
+                            <!-- Map entry table -->
+                            <div style="overflow-x:auto;">
+                                <table id="keymapTable" style="width:100%;font-size:12px;border-collapse:collapse;">
+                                    <thead>
+                                        <tr style="background:#f8f9fa;">
+                                            <th style="padding:5px 8px;text-align:left;border:1px solid #dee2e6;">Char</th>
+                                            <th style="padding:5px 8px;text-align:left;border:1px solid #dee2e6;">HID Key (dec)</th>
+                                            <th style="padding:5px 8px;text-align:left;border:1px solid #dee2e6;">Modifier</th>
+                                            <th style="padding:5px 8px;text-align:left;border:1px solid #dee2e6;">Mod flags</th>
+                                            <th style="padding:5px 8px;text-align:center;border:1px solid #dee2e6;">Del</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="keymapTableBody"></tbody>
+                                </table>
+                            </div>
+                            <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
+                                <button onclick="keymapAddRow()">+ Add Row</button>
+                                <span style="font-size:11px;color:#6c757d;">Modifier: 0=none 2=Shift 4=Alt 8=GUI 64=AltGr. Combine by adding.</span>
+                            </div>
+
+                            <!-- Raw JSON editor toggle -->
+                            <div style="margin-top:14px;">
+                                <button onclick="keymapToggleRaw()" style="font-size:12px;background:#6c757d;color:#fff;">{ } Toggle Raw JSON</button>
+                                <div id="keymapRawArea" style="display:none;margin-top:8px;">
+                                    <textarea id="keymapRawJson" rows="14" style="width:100%;font-family:monospace;font-size:12px;"></textarea>
+                                    <div style="display:flex;gap:8px;margin-top:6px;">
+                                        <button onclick="keymapApplyRaw()" style="background:#198754;color:#fff;">Apply Raw JSON</button>
+                                        <span style="font-size:11px;color:#6c757d;">Parses JSON and refreshes the table above.</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Format reference -->
+                    <div class="section" style="margin-top:12px;">
+                        <h4 style="margin-bottom:8px;">Keymap JSON Format</h4>
+                        <p style="font-size:12px;color:#6c757d;margin-bottom:8px;">
+                            Each entry maps a Unicode character to a HID key code and modifier byte.
+                            <code>key</code> is the raw HID usage ID (keyboard/keypad page 0x07) in decimal.
+                            <code>mod</code> is the modifier bitmask: <strong>2</strong>=Shift, <strong>4</strong>=Alt, <strong>8</strong>=GUI, <strong>64</strong>=AltGr. Values combine additively.
+                        </p>
+                        <pre style="font-size:11px;background:#f8f9fa;padding:10px;border-radius:4px;overflow-x:auto;">{
+  "id": "my-layout",
+  "name": "My Custom Layout",
+  "map": [
+    {"char": "y", "key": 29, "mod": 0},
+    {"char": "z", "key": 28, "mod": 0},
+    {"char": "ä", "key": 52, "mod": 0},
+    {"char": "Ä", "key": 52, "mod": 2},
+    {"char": "@", "key": 20, "mod": 64}
+  ]
+}</pre>
                     </div>
                 </div>
 

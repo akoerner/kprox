@@ -238,15 +238,16 @@ void setup() {
     }
 
     if (usbEnabled) {
-        USB.begin(); USBKeyboard.begin(); USBMouse.begin();
+        USB.begin();
+        KProxConsumer.begin();  // creates send semaphore; addDevice() ran in constructor
+        if (usbKeyboardEnabled) { USBKeyboard.begin(); usbKeyboardReady = true; }
+        if (usbMouseEnabled)    { USBMouse.begin();    usbMouseReady    = true; }
         usbInitialized   = true;
-        usbKeyboardReady = true;
-        usbMouseReady    = true;
     }
 
     delay(500);
     if (bluetoothEnabled) BLE_KEYBOARD.releaseAll();
-    if (usbEnabled && usbInitialized) USBKeyboard.releaseAll();
+    if (usbEnabled && usbInitialized) { if (usbKeyboardReady) USBKeyboard.releaseAll(); if (KProxConsumer.isReady()) { KProxConsumer.sendConsumer(0,0); KProxConsumer.sendSystem(0); } }
     feedWatchdog();
 
     mouseBatch.accumulatedX = 0;

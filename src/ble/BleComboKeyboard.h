@@ -68,14 +68,23 @@ const MediaKeyReport KEY_MEDIA_MUTE = {16, 0};
 const MediaKeyReport KEY_MEDIA_VOLUME_UP = {32, 0};
 const MediaKeyReport KEY_MEDIA_VOLUME_DOWN = {64, 0};
 const MediaKeyReport KEY_MEDIA_WWW_HOME = {128, 0};
-const MediaKeyReport KEY_MEDIA_LOCAL_MACHINE_BROWSER = {0, 1}; // Opens "My Computer" on Windows
+const MediaKeyReport KEY_MEDIA_LOCAL_MACHINE_BROWSER = {0, 1};
 const MediaKeyReport KEY_MEDIA_CALCULATOR = {0, 2};
 const MediaKeyReport KEY_MEDIA_WWW_BOOKMARKS = {0, 4};
 const MediaKeyReport KEY_MEDIA_WWW_SEARCH = {0, 8};
 const MediaKeyReport KEY_MEDIA_WWW_STOP = {0, 16};
 const MediaKeyReport KEY_MEDIA_WWW_BACK = {0, 32};
-const MediaKeyReport KEY_MEDIA_CONSUMER_CONTROL_CONFIGURATION = {0, 64}; // Media Selection
+const MediaKeyReport KEY_MEDIA_CONSUMER_CONTROL_CONFIGURATION = {0, 64};
 const MediaKeyReport KEY_MEDIA_EMAIL_READER = {0, 128};
+
+// System Control report — 1 byte bitmask (Generic Desktop page 0x01, System Control 0x80)
+// bit 0 = System Power Down (0x81)
+// bit 1 = System Sleep      (0x82)
+// bit 2 = System Wake Up    (0x83)
+typedef uint8_t SystemKeyReport;
+const SystemKeyReport KEY_SYSTEM_POWER = 0x01;
+const SystemKeyReport KEY_SYSTEM_SLEEP = 0x02;
+const SystemKeyReport KEY_SYSTEM_WAKE  = 0x04;
 
 
 //  Low level key report: up to 6 keys and shift, ctrl etc at once
@@ -95,8 +104,9 @@ private:
   BLECharacteristic* outputKeyboard;
   BLECharacteristic* inputMediaKeys;
   
-  BleKeyReport _keyReport;
+  BleKeyReport   _keyReport;
   MediaKeyReport _mediaKeyReport;
+  SystemKeyReport _systemKeyReport;
   static void taskServer(void* pvParameter);
 
 public:
@@ -105,12 +115,16 @@ public:
   void end(void);
   void sendReport(BleKeyReport* keys);
   void sendReport(MediaKeyReport* keys);
+  void sendSystemReport(SystemKeyReport* keys);
   size_t press(uint8_t k);
   size_t press(const MediaKeyReport k);
+  size_t pressSystemKey(SystemKeyReport k);
   size_t release(uint8_t k);
   size_t release(const MediaKeyReport k);
+  size_t releaseSystemKey(SystemKeyReport k);
   size_t write(uint8_t c);
   size_t write(const MediaKeyReport c);
+  size_t writeSystemKey(SystemKeyReport c);
   size_t write(const uint8_t *buffer, size_t size);
   
   void releaseAll(void);
@@ -121,6 +135,7 @@ public:
   std::string deviceName;
 
   BLECharacteristic* inputMouse;
+  BLECharacteristic* inputSystemKeys;
 
 };
 

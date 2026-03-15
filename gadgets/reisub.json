@@ -1,7 +1,7 @@
 {
   "gadget": {
     "name": "REISUB Magic SysRq",
-    "description": "Linux Magic SysRq emergency safe reboot sequence (R-E-I-S-U-B). Safely terminates processes, syncs disks, then reboots.",
+    "description": "Linux Magic SysRq emergency safe reboot sequence (R-E-I-S-U-B). Safely terminates processes, syncs disks, then reboots/halts. This will reboot/halt most linux and android devices",
     "content": "{CHORD ALT+SYSRQ+R}{SLEEP 2000}{CHORD ALT+SYSRQ+E}{SLEEP 2000}{CHORD ALT+SYSRQ+I}{SLEEP 2000}{CHORD ALT+SYSRQ+S}{SLEEP 2000}{CHORD ALT+SYSRQ+U}{SLEEP 2000}{CHORD ALT+SYSRQ+B}"
   }
 }

@@ -12,28 +12,31 @@ static bool bleMouseActive() { return isBLEConnected() && bleMouseEnabled; }
 static void hidPrint(const String& text) {
     if (bleKbActive()) BLE_KEYBOARD.print(text);
 #ifdef BOARD_HAS_USB_HID
-    if (isUSBConnected()) USBKeyboard.print(text);
+    if (isUSBConnected() && usbKeyboardEnabled) USBKeyboard.print(text);
 #endif
 }
 
 static void hidPress(uint8_t key) {
     if (bleKbActive()) BLE_KEYBOARD.press(key);
 #ifdef BOARD_HAS_USB_HID
-    if (isUSBConnected()) USBKeyboard.press(key);
+    if (isUSBConnected() && usbKeyboardEnabled) USBKeyboard.press(key);
 #endif
 }
 
 static void hidRelease(uint8_t key) {
     if (bleKbActive()) BLE_KEYBOARD.release(key);
 #ifdef BOARD_HAS_USB_HID
-    if (isUSBConnected()) USBKeyboard.release(key);
+    if (isUSBConnected() && usbKeyboardEnabled) USBKeyboard.release(key);
 #endif
 }
 
 void hidReleaseAll() {
     if (bleKbActive()) BLE_KEYBOARD.releaseAll();
 #ifdef BOARD_HAS_USB_HID
-    if (isUSBConnected()) USBKeyboard.releaseAll();
+    if (isUSBConnected()) {
+        if (usbKeyboardEnabled) USBKeyboard.releaseAll();
+        if (KProxConsumer.isReady()) { KProxConsumer.sendConsumer(0,0); KProxConsumer.sendSystem(0); }
+    }
 #endif
 }
 
@@ -92,7 +95,7 @@ void hidPressRaw(uint8_t hidUsage, uint8_t modifiers) {
     report.keys[0]   = hidUsage;
     if (bleKbActive()) BLE_KEYBOARD.sendReport(&report);
 #ifdef BOARD_HAS_USB_HID
-    if (isUSBConnected()) {
+    if (isUSBConnected() && usbKeyboardEnabled) {
         KeyReport kr = {};
         kr.modifiers = modifiers;
         kr.keys[0]   = hidUsage;
@@ -105,7 +108,7 @@ void hidReleaseRaw() {
     BleKeyReport report = {};
     if (bleKbActive()) BLE_KEYBOARD.sendReport(&report);
 #ifdef BOARD_HAS_USB_HID
-    if (isUSBConnected()) {
+    if (isUSBConnected() && usbKeyboardEnabled) {
         KeyReport kr = {};
         USBKeyboard.sendReport(&kr);
     }
@@ -169,6 +172,69 @@ void sendSpecialKey(uint8_t keycode) {
     delay(SPECIAL_KEY_DELAY);
 }
 
+void sendSpecialKeyTimed(uint8_t keycode, int holdMs) {
+    if (isHalted || !anyHIDConnected()) return;
+    hidReleaseAll();
+    delay(KEY_RELEASE_DELAY);
+    hidPress(keycode);
+    unsigned long t0 = millis();
+    while ((int)(millis() - t0) < holdMs) {
+        server.handleClient();
+        delay(10);
+    }
+    hidRelease(keycode);
+    delay(KEY_RELEASE_DELAY);
+    flashTxIndicator();
+    delay(SPECIAL_KEY_DELAY);
+}
+
+void pressKey(uint8_t keycode) {
+    if (isHalted || !anyHIDConnected()) return;
+    hidPress(keycode);
+    flashTxIndicator();
+}
+
+void releaseKey(uint8_t keycode) {
+    if (isHalted) return;
+    hidRelease(keycode);
+}
+
+void sendConsumerKey(const MediaKeyReport key) {
+    if (isHalted || !anyHIDConnected()) return;
+    if (bleKbActive()) {
+        BLE_KEYBOARD.write(key);
+        delay(KEY_PRESS_DELAY + KEY_RELEASE_DELAY);
+    }
+#ifdef BOARD_HAS_USB_HID
+    if (isUSBConnected() && KProxConsumer.isReady()) {
+        KProxConsumer.sendConsumer(key[0], key[1]);
+        delay(KEY_PRESS_DELAY);
+        KProxConsumer.sendConsumer(0, 0);
+        delay(KEY_RELEASE_DELAY);
+    }
+#endif
+    flashTxIndicator();
+    delay(SPECIAL_KEY_DELAY);
+}
+
+void sendSystemKey(SystemKeyReport key) {
+    if (isHalted || !anyHIDConnected()) return;
+    if (bleKbActive()) {
+        BLE_KEYBOARD.writeSystemKey(key);
+        delay(KEY_PRESS_DELAY + KEY_RELEASE_DELAY);
+    }
+#ifdef BOARD_HAS_USB_HID
+    if (isUSBConnected() && KProxConsumer.isReady()) {
+        KProxConsumer.sendSystem(key);
+        delay(KEY_PRESS_DELAY);
+        KProxConsumer.sendSystem(0);
+        delay(KEY_RELEASE_DELAY);
+    }
+#endif
+    flashTxIndicator();
+    delay(SPECIAL_KEY_DELAY);
+}
+
 void sendKeyChord(const std::vector<uint8_t>& keycodes, uint8_t modifiers) {
     if (isHalted || !anyHIDConnected()) return;
     hidReleaseAll();
@@ -185,18 +251,67 @@ void sendKeyChord(const std::vector<uint8_t>& keycodes, uint8_t modifiers) {
     delay(SPECIAL_KEY_DELAY);
 }
 
+static uint8_t resolveChordKey(const String& s) {
+    if (s == "ENTER" || s == "RETURN")   return KEY_RETURN;
+    if (s == "SPACE")                    return KEY_SPACE;
+    if (s == "TAB")                      return KEY_TAB;
+    if (s == "ESC" || s == "ESCAPE")     return KEY_ESC;
+    if (s == "DELETE" || s == "DEL")     return KEY_DELETE;
+    if (s == "BACKSPACE" || s == "BKSP") return KEY_BACKSPACE;
+    if (s == "LEFT")                     return KEY_LEFT_ARROW;
+    if (s == "RIGHT")                    return KEY_RIGHT_ARROW;
+    if (s == "UP")                       return KEY_UP_ARROW;
+    if (s == "DOWN")                     return KEY_DOWN_ARROW;
+    if (s == "INSERT")                   return KEY_INSERT;
+    if (s == "HOME")                     return KEY_HOME;
+    if (s == "END")                      return KEY_END;
+    if (s == "PAGEUP")                   return KEY_PAGE_UP;
+    if (s == "PAGEDOWN")                 return KEY_PAGE_DOWN;
+    if (s == "PRINTSCREEN" || s == "PRTSC" || s == "SYSRQ") return KEY_PRINTSCREEN;
+    if (s == "CAPSLOCK" || s == "CAPS")  return KEY_CAPS_LOCK;
+    if (s == "NUMLOCK")                  return KEY_NUM_LOCK;
+    if (s == "SCROLLLOCK" || s == "SCRLK") return KEY_SCROLL_LOCK;
+    if (s == "PAUSE" || s == "PAUSEBREAK" || s == "BREAK") return KEY_PAUSE;
+    if (s == "APPLICATION" || s == "MENU" || s == "APP")   return KEY_APPLICATION;
+    if (s == "KPENTER")                  return KEY_KP_ENTER;
+    if (s == "KPPLUS")                   return KEY_KP_PLUS;
+    if (s == "KPMINUS")                  return KEY_KP_MINUS;
+    if (s == "KPMULTIPLY" || s == "KPSTAR") return KEY_KP_MULTIPLY;
+    if (s == "KPDIVIDE" || s == "KPSLASH") return KEY_KP_DIVIDE;
+    if (s == "KPDOT" || s == "KPDECIMAL") return KEY_KP_DOT;
+    if (s.startsWith("KP") && s.length() == 3) {
+        char d = s[2];
+        if (d >= '0' && d <= '9') return (d == '0') ? KEY_KP0 : (KEY_KP1 + (d - '1'));
+    }
+    if (s.startsWith("F")) {
+        int n = s.substring(1).toInt();
+        if (n >= 1  && n <= 12) return KEY_F1  + (n - 1);
+        if (n >= 13 && n <= 24) return KEY_F13 + (n - 13);
+    }
+    return 0;
+}
+
 void processChord(const String& chordStr) {
     String str = chordStr;
     std::vector<uint8_t> chordKeys;
     uint8_t modifiers = 0;
 
-    if (str.indexOf("CTRL+")  >= 0) { modifiers |= KEY_LEFT_CTRL;  str.replace("CTRL+",  ""); }
-    if (str.indexOf("ALT+")   >= 0) { modifiers |= KEY_LEFT_ALT;   str.replace("ALT+",   ""); }
-    if (str.indexOf("SHIFT+") >= 0) { modifiers |= KEY_LEFT_SHIFT; str.replace("SHIFT+", ""); }
-    if (str.indexOf("GUI+")   >= 0 || str.indexOf("CMD+") >= 0 || str.indexOf("WIN+") >= 0) {
-        modifiers |= KEY_LEFT_GUI;
-        str.replace("GUI+", ""); str.replace("CMD+", ""); str.replace("WIN+", "");
-    }
+    if (str.indexOf("LCTRL+")  >= 0) { modifiers |= KEY_LEFT_CTRL;  str.replace("LCTRL+",  ""); }
+    if (str.indexOf("RCTRL+")  >= 0) { modifiers |= KEY_RIGHT_CTRL; str.replace("RCTRL+",  ""); }
+    if (str.indexOf("CTRL+")   >= 0) { modifiers |= KEY_LEFT_CTRL;  str.replace("CTRL+",   ""); }
+    if (str.indexOf("LSHIFT+") >= 0) { modifiers |= KEY_LEFT_SHIFT; str.replace("LSHIFT+", ""); }
+    if (str.indexOf("RSHIFT+") >= 0) { modifiers |= KEY_RIGHT_SHIFT; str.replace("RSHIFT+",""); }
+    if (str.indexOf("SHIFT+")  >= 0) { modifiers |= KEY_LEFT_SHIFT; str.replace("SHIFT+",  ""); }
+    if (str.indexOf("LALT+")   >= 0) { modifiers |= KEY_LEFT_ALT;   str.replace("LALT+",   ""); }
+    if (str.indexOf("ALTGR+")  >= 0) { modifiers |= KEY_RIGHT_ALT;  str.replace("ALTGR+",  ""); }
+    if (str.indexOf("RALT+")   >= 0) { modifiers |= KEY_RIGHT_ALT;  str.replace("RALT+",   ""); }
+    if (str.indexOf("ALT+")    >= 0) { modifiers |= KEY_LEFT_ALT;   str.replace("ALT+",    ""); }
+    if (str.indexOf("WINDOWS+")>= 0) { modifiers |= KEY_LEFT_GUI;   str.replace("WINDOWS+",""); }
+    if (str.indexOf("SUPER+")  >= 0) { modifiers |= KEY_LEFT_GUI;   str.replace("SUPER+",  ""); }
+    if (str.indexOf("MOD+")    >= 0) { modifiers |= KEY_LEFT_GUI;   str.replace("MOD+",    ""); }
+    if (str.indexOf("CMD+")    >= 0) { modifiers |= KEY_LEFT_GUI;   str.replace("CMD+",    ""); }
+    if (str.indexOf("WIN+")    >= 0) { modifiers |= KEY_LEFT_GUI;   str.replace("WIN+",    ""); }
+    if (str.indexOf("GUI+")    >= 0) { modifiers |= KEY_LEFT_GUI;   str.replace("GUI+",    ""); }
     str.trim();
 
     if (str.indexOf("SYSRQ+") >= 0) {
@@ -219,26 +334,8 @@ void processChord(const String& chordStr) {
         char c = str.charAt(0);
         chordKeys.push_back((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c);
     } else {
-        if      (str == "ENTER")       chordKeys.push_back(KEY_RETURN);
-        else if (str == "SPACE")       chordKeys.push_back(KEY_SPACE);
-        else if (str == "TAB")         chordKeys.push_back(KEY_TAB);
-        else if (str == "ESC")         chordKeys.push_back(KEY_ESC);
-        else if (str == "DELETE")      chordKeys.push_back(KEY_DELETE);
-        else if (str == "BACKSPACE")   chordKeys.push_back(KEY_BACKSPACE);
-        else if (str == "LEFT")        chordKeys.push_back(KEY_LEFT_ARROW);
-        else if (str == "RIGHT")       chordKeys.push_back(KEY_RIGHT_ARROW);
-        else if (str == "UP")          chordKeys.push_back(KEY_UP_ARROW);
-        else if (str == "DOWN")        chordKeys.push_back(KEY_DOWN_ARROW);
-        else if (str == "INSERT")      chordKeys.push_back(KEY_INSERT);
-        else if (str == "HOME")        chordKeys.push_back(KEY_HOME);
-        else if (str == "END")         chordKeys.push_back(KEY_END);
-        else if (str == "PAGEUP")      chordKeys.push_back(KEY_PAGE_UP);
-        else if (str == "PAGEDOWN")    chordKeys.push_back(KEY_PAGE_DOWN);
-        else if (str == "PRINTSCREEN" || str == "SYSRQ") chordKeys.push_back(KEY_PRINTSCREEN);
-        else if (str.startsWith("F") && str.length() <= 3) {
-            int n = str.substring(1).toInt();
-            if (n >= 1 && n <= 12) chordKeys.push_back(KEY_F1 + (n - 1));
-        }
+        uint8_t resolved = resolveChordKey(str);
+        if (resolved) chordKeys.push_back(resolved);
     }
 
     if (!chordKeys.empty() || modifiers) {

@@ -76,6 +76,7 @@
 #  include "USBHIDKeyboard.h"
 #  include "USBHIDMouse.h"
 #  include "ble/USBHIDFIDO2.h"
+#  include "KProxConsumerHID.h"
 #endif
 
 struct MouseBatch {
@@ -130,9 +131,9 @@ extern bool usbEnabled;
 extern bool usbInitialized;
 extern bool usbKeyboardReady;
 extern bool usbMouseReady;
-extern bool usbKeyboardEnabled;    // USB keyboard sub-enable
-extern bool usbMouseEnabled;       // USB mouse sub-enable
-extern bool fido2Enabled;          // FIDO2/CTAP2 USB HID sub-enable
+extern bool usbKeyboardEnabled;
+extern bool usbMouseEnabled;
+extern bool fido2Enabled;
 #endif
 
 // ---- Network state ----

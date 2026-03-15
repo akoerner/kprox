@@ -21,9 +21,10 @@
 
 
 // Report IDs:
-#define KEYBOARD_ID 0x01
-#define MEDIA_KEYS_ID 0x02
-#define MOUSE_ID 0x03
+#define KEYBOARD_ID    0x01
+#define MEDIA_KEYS_ID  0x02
+#define MOUSE_ID       0x03
+#define SYSTEM_KEYS_ID 0x04
 
 static const uint8_t _hidReportDescriptor[] = {
   USAGE_PAGE(1),      0x01,          // USAGE_PAGE (Generic Desktop Ctrls)
@@ -128,7 +129,25 @@ static const uint8_t _hidReportDescriptor[] = {
   REPORT_COUNT(1),     0x01, //     REPORT_COUNT (1)
   HIDINPUT(1),         0x06, //     INPUT (Data, Var, Rel)
   END_COLLECTION(0),         //   END_COLLECTION
-  END_COLLECTION(0)          // END_COLLECTION
+  END_COLLECTION(0),         // END_COLLECTION
+
+  // ------------------------------------------------- System Keys (Generic Desktop / System Control)
+  USAGE_PAGE(1),     0x01,          // USAGE_PAGE (Generic Desktop)
+  USAGE(1),          0x80,          // USAGE (System Control)
+  COLLECTION(1),     0x01,          // COLLECTION (Application)
+  REPORT_ID(1),      SYSTEM_KEYS_ID,
+  LOGICAL_MINIMUM(1),0x00,          //   LOGICAL_MINIMUM (0)
+  LOGICAL_MAXIMUM(1),0x01,          //   LOGICAL_MAXIMUM (1)
+  REPORT_SIZE(1),    0x01,          //   REPORT_SIZE (1)
+  REPORT_COUNT(1),   0x03,          //   REPORT_COUNT (3)
+  USAGE(1),          0x81,          //   USAGE (System Power Down)   ; bit 0
+  USAGE(1),          0x82,          //   USAGE (System Sleep)        ; bit 1
+  USAGE(1),          0x83,          //   USAGE (System Wake Up)      ; bit 2
+  HIDINPUT(1),       0x02,          //   INPUT (Data,Var,Abs)
+  REPORT_COUNT(1),   0x01,          //   REPORT_COUNT (1)
+  REPORT_SIZE(1),    0x05,          //   REPORT_SIZE (5) — pad to byte
+  HIDINPUT(1),       0x03,          //   INPUT (Const,Var,Abs)
+  END_COLLECTION(0)                 // END_COLLECTION
 };
 
 BleComboKeyboard::BleComboKeyboard(std::string deviceName, std::string deviceManufacturer, uint8_t batteryLevel) : hid(0)
@@ -137,6 +156,13 @@ BleComboKeyboard::BleComboKeyboard(std::string deviceName, std::string deviceMan
   this->deviceManufacturer = deviceManufacturer;
   this->batteryLevel = batteryLevel;
   this->connectionStatus = new BleConnectionStatus();
+  // Initialize report characteristic pointers to nullptr so null guards are safe
+  this->inputKeyboard    = nullptr;
+  this->outputKeyboard   = nullptr;
+  this->inputMediaKeys   = nullptr;
+  this->inputSystemKeys  = nullptr;
+  this->inputMouse       = nullptr;
+  this->_systemKeyReport = 0;
 }
 
 void BleComboKeyboard::begin(void)
@@ -167,7 +193,8 @@ void BleComboKeyboard::taskServer(void* pvParameter) {
   bleKeyboardInstance->hid = new BLEHIDDevice(pServer);
   bleKeyboardInstance->inputKeyboard = bleKeyboardInstance->hid->inputReport(KEYBOARD_ID); // <-- input REPORTID from report map
   bleKeyboardInstance->outputKeyboard = bleKeyboardInstance->hid->outputReport(KEYBOARD_ID);
-  bleKeyboardInstance->inputMediaKeys = bleKeyboardInstance->hid->inputReport(MEDIA_KEYS_ID);
+  bleKeyboardInstance->inputMediaKeys  = bleKeyboardInstance->hid->inputReport(MEDIA_KEYS_ID);
+  bleKeyboardInstance->inputSystemKeys = bleKeyboardInstance->hid->inputReport(SYSTEM_KEYS_ID);
   bleKeyboardInstance->connectionStatus->inputKeyboard = bleKeyboardInstance->inputKeyboard;
   bleKeyboardInstance->connectionStatus->outputKeyboard = bleKeyboardInstance->outputKeyboard;
   
@@ -209,10 +236,19 @@ void BleComboKeyboard::sendReport(BleKeyReport* keys)
 
 void BleComboKeyboard::sendReport(MediaKeyReport* keys)
 {
-  if (this->isConnected())
+  if (this->isConnected() && this->inputMediaKeys)
   {
     this->inputMediaKeys->setValue((uint8_t*)keys, sizeof(MediaKeyReport));
     this->inputMediaKeys->notify();
+  }
+}
+
+void BleComboKeyboard::sendSystemReport(SystemKeyReport* keys)
+{
+  if (this->isConnected() && this->inputSystemKeys)
+  {
+    this->inputSystemKeys->setValue((uint8_t*)keys, sizeof(SystemKeyReport));
+    this->inputSystemKeys->notify();
   }
 }
 
@@ -471,7 +507,10 @@ void BleComboKeyboard::releaseAll(void)
 	_keyReport.modifiers = 0;
     _mediaKeyReport[0] = 0;
     _mediaKeyReport[1] = 0;
+    _systemKeyReport   = 0;
 	sendReport(&_keyReport);
+	sendReport(&_mediaKeyReport);
+	sendSystemReport(&_systemKeyReport);
 }
 
 size_t BleComboKeyboard::write(uint8_t c)
@@ -486,6 +525,27 @@ size_t BleComboKeyboard::write(const MediaKeyReport c)
 	uint16_t p = press(c);  // Keydown
 	release(c);            // Keyup
 	return p;              // just return the result of press() since release() almost always returns 1
+}
+
+size_t BleComboKeyboard::pressSystemKey(SystemKeyReport k)
+{
+    _systemKeyReport |= k;
+    sendSystemReport(&_systemKeyReport);
+    return 1;
+}
+
+size_t BleComboKeyboard::releaseSystemKey(SystemKeyReport k)
+{
+    _systemKeyReport &= ~k;
+    sendSystemReport(&_systemKeyReport);
+    return 1;
+}
+
+size_t BleComboKeyboard::writeSystemKey(SystemKeyReport c)
+{
+    pressSystemKey(c);
+    releaseSystemKey(c);
+    return 1;
 }
 
 size_t BleComboKeyboard::write(const uint8_t *buffer, size_t size) {

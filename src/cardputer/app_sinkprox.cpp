@@ -52,6 +52,68 @@ void AppSinkProx::_doDelete() {
     _needsRedraw   = true;
 }
 
+void AppSinkProx::_drawHelp() {
+    auto& disp = M5Cardputer.Display;
+    const int W = disp.width();
+    const int H = disp.height();
+
+    disp.fillScreen(SK_BG);
+
+    uint16_t barBg = disp.color565(0, 80, 80);
+    disp.fillRect(0, 0, W, SK_BAR_H, barBg);
+    disp.setTextSize(1);
+    disp.setTextColor(TFT_WHITE, barBg);
+    disp.drawString("SinkProx  [Help]", 4, 3);
+    disp.setTextColor(disp.color565(120, 200, 200), barBg);
+    disp.drawString("2/2", W - disp.textWidth("2/2") - 4, 3);
+
+    int y = SK_BAR_H + 5;
+    uint16_t hdr   = disp.color565(100, 220, 200);
+    uint16_t body  = disp.color565(200, 200, 200);
+    uint16_t dim   = disp.color565(120, 160, 120);
+    uint16_t hi    = disp.color565(255, 220, 80);
+
+    disp.setTextColor(hdr, SK_BG);
+    disp.drawString("What is SinkProx?", 4, y); y += 13;
+    disp.setTextColor(body, SK_BG);
+    disp.drawString("A staging buffer for token strings.", 4, y); y += 11;
+    disp.drawString("POST text to /api/sink; it sits", 4, y); y += 11;
+    disp.drawString("here until you flush it.", 4, y); y += 14;
+
+    disp.setTextColor(hdr, SK_BG);
+    disp.drawString("Why use it?", 4, y); y += 12;
+    disp.setTextColor(body, SK_BG);
+    disp.drawString("Lets you queue a payload from a", 4, y); y += 11;
+    disp.drawString("phone/laptop then trigger it by", 4, y); y += 11;
+    disp.drawString("pressing a button on the device.", 4, y); y += 14;
+
+    disp.setTextColor(hdr, SK_BG);
+    disp.drawString("Controls", 4, y); y += 12;
+    disp.setTextColor(hi, SK_BG);
+    disp.drawString("ENTER / G0", 4, y);
+    disp.setTextColor(body, SK_BG);
+    disp.drawString("  flush buffer", 60, y); y += 11;
+    disp.setTextColor(hi, SK_BG);
+    disp.drawString("D", 4, y);
+    disp.setTextColor(body, SK_BG);
+    disp.drawString("           delete buffer", 60, y); y += 11;
+    disp.setTextColor(hi, SK_BG);
+    disp.drawString("H / ?", 4, y);
+    disp.setTextColor(body, SK_BG);
+    disp.drawString("        toggle this page", 60, y); y += 11;
+    disp.setTextColor(hi, SK_BG);
+    disp.drawString("BtnA hold 2s", 4, y);
+    disp.setTextColor(body, SK_BG);
+    disp.drawString("  halt/resume", 60, y); y += 2;
+
+    uint16_t botBg = disp.color565(16, 16, 16);
+    disp.fillRect(0, H - SK_BOT_H, W, SK_BOT_H, botBg);
+    disp.setTextColor(disp.color565(100, 140, 100), botBg);
+    disp.drawString("H/? toggle help  ESC back", 2, H - SK_BOT_H + 2);
+
+    _needsRedraw = false;
+}
+
 void AppSinkProx::_draw() {
     auto& disp = M5Cardputer.Display;
     const int W = disp.width();
@@ -132,7 +194,7 @@ void AppSinkProx::_draw() {
     uint16_t botBg = disp.color565(16, 16, 16);
     disp.fillRect(0, H - SK_BOT_H, W, SK_BOT_H, botBg);
     disp.setTextColor(disp.color565(100, 140, 100), botBg);
-    disp.drawString("ENT/G0 flush  D delete  ESC back", 2, H - SK_BOT_H + 2);
+    disp.drawString("ENT flush  D del  H help  ESC back", 2, H - SK_BOT_H + 2);
 
     _needsRedraw = false;
 }
@@ -163,6 +225,7 @@ void AppSinkProx::onEnter() {
     _confirmDelete = false;
     _needsRedraw   = true;
     _lastPoll      = 0;
+    _page          = 0;
     _pollSize();
 }
 
@@ -177,7 +240,7 @@ void AppSinkProx::onUpdate() {
         if (_sinkSize != prev) _needsRedraw = true;
     }
 
-    if (_needsRedraw) _draw();
+    if (_needsRedraw) { if (_page == 1) _drawHelp(); else _draw(); }
 
     KeyInput ki = pollKeys();
     if (!ki.anyKey) return;
@@ -190,7 +253,17 @@ void AppSinkProx::onUpdate() {
         return;
     }
 
-    if (ki.esc) { uiManager.returnToLauncher(); return; }
+    if (ki.esc) {
+        if (_page == 1) { _page = 0; _needsRedraw = true; }
+        else uiManager.returnToLauncher();
+        return;
+    }
+    if (ki.ch == 'h' || ki.ch == 'H' || ki.ch == '?') {
+        _page = (_page == 1) ? 0 : 1;
+        _needsRedraw = true;
+        return;
+    }
+    if (_page == 1) return;
     if (ki.enter) { _doFlush(); return; }
     if (ki.ch == 'd' || ki.ch == 'D') {
         _confirmDelete = true; _needsRedraw = true; return;

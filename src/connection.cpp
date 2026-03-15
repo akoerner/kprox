@@ -60,6 +60,7 @@ void enableUSB() {
         USB.serialNumber(USB_SERIAL_NUMBER);
         if (fido2Enabled) FIDO2Device.begin();
         USB.begin();
+        KProxConsumer.begin();  // creates send semaphore; addDevice() ran in constructor
         if (usbKeyboardEnabled) { USBKeyboard.begin(); usbKeyboardReady = true; }
         if (usbMouseEnabled)    { USBMouse.begin();    usbMouseReady    = true; }
         usbInitialized = true;
@@ -77,8 +78,7 @@ void disableUSB() {
     if (!usbEnabled) return;
     usbEnabled = false;
     if (usbInitialized) {
-        if (usbKeyboardReady) { USBKeyboard.releaseAll(); USBKeyboard.end(); }
-        if (usbMouseReady)    { USBMouse.end(); }
+        if (usbKeyboardReady) USBKeyboard.releaseAll(); if (KProxConsumer.isReady()) { KProxConsumer.sendConsumer(0,0); KProxConsumer.sendSystem(0); }
         usbKeyboardReady = false;
         usbMouseReady    = false;
     }

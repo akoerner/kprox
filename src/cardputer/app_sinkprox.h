@@ -17,12 +17,13 @@ public:
     bool handlesGlobalBtnA() const override { return true; }
 
 private:
-    bool          _needsRedraw  = true;
+    bool          _needsRedraw   = true;
     bool          _confirmDelete = false;
     String        _statusMsg;
-    bool          _statusOk     = false;
-    size_t        _sinkSize     = 0;
-    unsigned long _lastPoll     = 0;
+    bool          _statusOk      = false;
+    size_t        _sinkSize      = 0;
+    unsigned long _lastPoll      = 0;
+    int           _page          = 0;   // 0 = main, 1 = help
 
     static constexpr unsigned long POLL_MS   = 2000;
     static constexpr const char*   SINK_FILE = "/sink.txt";
@@ -35,6 +36,7 @@ private:
     static constexpr unsigned long DBL_MS = 350;
 
     void _draw();
+    void _drawHelp();
     void _doFlush();
     void _doDelete();
     void _pollSize();

@@ -369,28 +369,195 @@ static String evaluateAllTokens(String input, std::map<String, String>& vars) {
     return processEscapeSequences(input);
 }
 
+// Returns true for any token that acts as a control/command vs plain typed text.
+// Key tokens now support optional arguments: {ENTER} {ENTER 500} {ENTER press} {ENTER release}
+static bool isKeyToken(const String& upper) {
+    return (upper == "ENTER"      || upper == "RETURN"    ||
+            upper == "TAB"        || upper == "ESC"       || upper == "ESCAPE"      ||
+            upper == "SPACE"      || upper == "BACKSPACE" || upper == "BKSP"        ||
+            upper == "DELETE"     || upper == "DEL"       || upper == "INSERT"      ||
+            upper == "LEFT"       || upper == "RIGHT"     || upper == "UP"          ||
+            upper == "DOWN"       || upper == "HOME"      || upper == "END"         ||
+            upper == "PAGEUP"     || upper == "PAGEDOWN"  ||
+            upper == "PRINTSCREEN"|| upper == "PRTSC"     || upper == "SYSRQ"       ||
+            upper == "CAPSLOCK"   || upper == "CAPS"      ||
+            upper == "NUMLOCK"    || upper == "SCROLLLOCK"|| upper == "SCRLK"       ||
+            upper == "PAUSE"      || upper == "PAUSEBREAK"||
+            upper == "APPLICATION"|| upper == "MENU"      || upper == "APP"         ||
+            upper == "GUI"        || upper == "MOD"       || upper == "WIN"         ||
+            upper == "CMD"        || upper == "SUPER"     || upper == "WINDOWS"     ||
+            upper == "CTRL"       || upper == "LCTRL"     || upper == "RCTRL"       ||
+            upper == "ALT"        || upper == "LALT"      || upper == "RALT"        ||
+            upper == "ALTGR"      || upper == "SHIFT"     || upper == "LSHIFT"      ||
+            upper == "RSHIFT"     ||
+            upper == "KPENTER"    || upper == "KPPLUS"    || upper == "KPMINUS"     ||
+            upper == "KPMULTIPLY" || upper == "KPSTAR"    || upper == "KPDIVIDE"    ||
+            upper == "KPSLASH"    || upper == "KPDOT"     || upper == "KPDECIMAL"   ||
+            upper == "KP0"        || upper == "KP1"       || upper == "KP2"         ||
+            upper == "KP3"        || upper == "KP4"       || upper == "KP5"         ||
+            upper == "KP6"        || upper == "KP7"       || upper == "KP8"         ||
+            upper == "KP9"        ||
+            // Media / consumer keys
+            upper == "MUTE"       || upper == "VOLUMEUP"  || upper == "VOLUP"       ||
+            upper == "VOLUMEDOWN" || upper == "VOLDOWN"   || upper == "PLAYPAUSE"   ||
+            upper == "NEXTTRACK"  || upper == "NEXT"      || upper == "PREVTRACK"   ||
+            upper == "PREV"       || upper == "STOPTRACK" || upper == "STOP"        ||
+            upper == "WWWHOME"    || upper == "BROWSER"   || upper == "EMAIL"       ||
+            upper == "CALCULATOR" || upper == "CALC"      || upper == "MYCOMPUTER"  ||
+            upper == "WWWSEARCH"  || upper == "WWWBACK"   || upper == "WWWFORWARD"  ||
+            upper == "WWWSTOP"    || upper == "WWWREFRESH"|| upper == "BOOKMARKS"   ||
+            upper == "MEDIASEL"   ||
+            // System control keys
+            upper == "SYSTEMPOWER"|| upper == "SYSPOWER"  || upper == "POWERDOWN"   ||
+            upper == "SYSTEMSLEEP"|| upper == "SYSSLEEP"  ||
+            upper == "SYSTEMWAKE" || upper == "SYSWAKE"   || upper == "WAKEUP"      ||
+            // F1-F24
+            (upper.startsWith("F") && upper.length() <= 3 && upper.substring(1).toInt() >= 1  && upper.substring(1).toInt() <= 12) ||
+            (upper.startsWith("F") && upper.length() <= 3 && upper.substring(1).toInt() >= 13 && upper.substring(1).toInt() <= 24));
+}
+
 static bool isControlToken(const String& token) {
     String u = token;
     u.toUpperCase();
 
-    bool isFKey = u.startsWith("F") && u.length() <= 3 && u.substring(1).toInt() >= 1 && u.substring(1).toInt() <= 12;
+    // Key tokens with optional arg: "ENTER", "ENTER 500", "ENTER press", "ENTER release"
+    int sp = u.indexOf(' ');
+    String base = (sp >= 0) ? u.substring(0, sp) : u;
+    if (isKeyToken(base)) return true;
 
-    return (u == "ENTER" || u == "TAB" || u == "ESC" || u == "ESCAPE" || u == "SPACE" ||
-            u == "BACKSPACE" || u == "DELETE" || u == "LEFT" || u == "RIGHT" ||
-            u == "UP" || u == "DOWN" || u == "INSERT" || u == "HOME" || u == "END" ||
-            u == "PAGEUP" || u == "PAGEDOWN" || u == "PRINTSCREEN" || u == "SYSRQ" || isFKey ||
+    return (u == "RELEASEALL" ||
             u == "BLUETOOTH_ENABLE" || u == "BLUETOOTH_DISABLE" ||
-            u == "USB_ENABLE" || u == "USB_DISABLE" ||
-            u == "HALT" || u == "RESUME" || u == "SINKPROX" ||
-            u == "ENDLOOP" || u == "ENDFOR" || u == "ENDWHILE" ||
-            u == "ELSE" || u == "ENDIF" || u == "BREAK" ||
-            u.startsWith("SLEEP ")   || u.startsWith("CHORD ")   || u.startsWith("HID ")    ||
-            u.startsWith("WIFI ")    || u.startsWith("SETMOUSE ") || u.startsWith("MOVEMOUSE ") ||
-            u.startsWith("MOUSECLICK") || u.startsWith("MOUSEPRESS") ||
-            u.startsWith("MOUSERELEASE") || u.startsWith("MOUSEDOUBLECLICK") ||
-            u.startsWith("LOOP")    || u.startsWith("FOR ")  || u.startsWith("WHILE ") ||
-            u.startsWith("BREAK ")  || u.startsWith("SCHEDULE ") ||
-            u.startsWith("SET ")    || u.startsWith("IF ")   || u.startsWith("KEYMAP"));
+            u == "USB_ENABLE"       || u == "USB_DISABLE"       ||
+            u == "HALT"     || u == "RESUME"  || u == "SINKPROX"  ||
+            u == "ENDLOOP"  || u == "ENDFOR"  || u == "ENDWHILE"  ||
+            u == "ELSE"     || u == "ENDIF"   || u == "BREAK"     ||
+            u.startsWith("SLEEP ")      || u.startsWith("CHORD ")       || u.startsWith("HID ")        ||
+            u.startsWith("WIFI ")       || u.startsWith("SETMOUSE ")    || u.startsWith("MOVEMOUSE ")  ||
+            u.startsWith("MOUSECLICK")  || u.startsWith("MOUSEPRESS")   ||
+            u.startsWith("MOUSERELEASE")|| u.startsWith("MOUSEDOUBLECLICK") ||
+            u.startsWith("LOOP")        || u.startsWith("FOR ")         || u.startsWith("WHILE ")      ||
+            u.startsWith("BREAK ")      || u.startsWith("SCHEDULE ")    ||
+            u.startsWith("SET ")        || u.startsWith("IF ")          || u.startsWith("KEYMAP"));
+}
+
+// ---- Key token resolution ----
+
+static uint8_t resolveKeyToken(const String& upper) {
+    if (upper == "ENTER"      || upper == "RETURN")     return KEY_RETURN;
+    if (upper == "TAB")                                  return KEY_TAB;
+    if (upper == "ESC"        || upper == "ESCAPE")      return KEY_ESC;
+    if (upper == "SPACE")                                return KEY_SPACE;
+    if (upper == "BACKSPACE"  || upper == "BKSP")        return KEY_BACKSPACE;
+    if (upper == "DELETE"     || upper == "DEL")         return KEY_DELETE;
+    if (upper == "INSERT")                               return KEY_INSERT;
+    if (upper == "LEFT")                                 return KEY_LEFT_ARROW;
+    if (upper == "RIGHT")                                return KEY_RIGHT_ARROW;
+    if (upper == "UP")                                   return KEY_UP_ARROW;
+    if (upper == "DOWN")                                 return KEY_DOWN_ARROW;
+    if (upper == "HOME")                                 return KEY_HOME;
+    if (upper == "END")                                  return KEY_END;
+    if (upper == "PAGEUP")                               return KEY_PAGE_UP;
+    if (upper == "PAGEDOWN")                             return KEY_PAGE_DOWN;
+    if (upper == "PRINTSCREEN"|| upper == "PRTSC"
+                              || upper == "SYSRQ")       return KEY_PRINTSCREEN;
+    if (upper == "CAPSLOCK"   || upper == "CAPS")        return KEY_CAPS_LOCK;
+    if (upper == "NUMLOCK")                              return KEY_NUM_LOCK;
+    if (upper == "SCROLLLOCK" || upper == "SCRLK")       return KEY_SCROLL_LOCK;
+    if (upper == "PAUSE"      || upper == "PAUSEBREAK")  return KEY_PAUSE;
+    if (upper == "APPLICATION"|| upper == "MENU"
+                              || upper == "APP")         return KEY_APPLICATION;
+    if (upper == "GUI"  || upper == "MOD"   || upper == "WIN"
+     || upper == "CMD"  || upper == "SUPER" || upper == "WINDOWS") return KEY_LEFT_GUI;
+    if (upper == "CTRL" || upper == "LCTRL")             return KEY_LEFT_CTRL;
+    if (upper == "RCTRL")                                return KEY_RIGHT_CTRL;
+    if (upper == "ALT"  || upper == "LALT")              return KEY_LEFT_ALT;
+    if (upper == "RALT" || upper == "ALTGR")             return KEY_RIGHT_ALT;
+    if (upper == "SHIFT"|| upper == "LSHIFT")            return KEY_LEFT_SHIFT;
+    if (upper == "RSHIFT")                               return KEY_RIGHT_SHIFT;
+    if (upper == "KPENTER")                              return KEY_KP_ENTER;
+    if (upper == "KPPLUS")                               return KEY_KP_PLUS;
+    if (upper == "KPMINUS")                              return KEY_KP_MINUS;
+    if (upper == "KPMULTIPLY" || upper == "KPSTAR")      return KEY_KP_MULTIPLY;
+    if (upper == "KPDIVIDE"   || upper == "KPSLASH")     return KEY_KP_DIVIDE;
+    if (upper == "KPDOT"      || upper == "KPDECIMAL")   return KEY_KP_DOT;
+    if (upper == "KP0") return KEY_KP0;
+    if (upper == "KP1") return KEY_KP1;
+    if (upper == "KP2") return KEY_KP2;
+    if (upper == "KP3") return KEY_KP3;
+    if (upper == "KP4") return KEY_KP4;
+    if (upper == "KP5") return KEY_KP5;
+    if (upper == "KP6") return KEY_KP6;
+    if (upper == "KP7") return KEY_KP7;
+    if (upper == "KP8") return KEY_KP8;
+    if (upper == "KP9") return KEY_KP9;
+    if (upper.startsWith("F")) {
+        int n = upper.substring(1).toInt();
+        if (n >= 1  && n <= 12) return KEY_F1  + (n - 1);
+        if (n >= 13 && n <= 24) return KEY_F13 + (n - 13);
+    }
+    return 0;
+}
+
+static bool tryDispatchConsumerKey(const String& upper) {
+    if (upper == "MUTE")                                { sendConsumerKey(KEY_MEDIA_MUTE);                         return true; }
+    if (upper == "VOLUMEUP"   || upper == "VOLUP")      { sendConsumerKey(KEY_MEDIA_VOLUME_UP);                    return true; }
+    if (upper == "VOLUMEDOWN" || upper == "VOLDOWN")    { sendConsumerKey(KEY_MEDIA_VOLUME_DOWN);                   return true; }
+    if (upper == "PLAYPAUSE")                           { sendConsumerKey(KEY_MEDIA_PLAY_PAUSE);                   return true; }
+    if (upper == "NEXTTRACK"  || upper == "NEXT")       { sendConsumerKey(KEY_MEDIA_NEXT_TRACK);                   return true; }
+    if (upper == "PREVTRACK"  || upper == "PREV")       { sendConsumerKey(KEY_MEDIA_PREVIOUS_TRACK);               return true; }
+    if (upper == "STOPTRACK"  || upper == "STOP")       { sendConsumerKey(KEY_MEDIA_STOP);                         return true; }
+    if (upper == "WWWHOME"    || upper == "BROWSER")    { sendConsumerKey(KEY_MEDIA_WWW_HOME);                     return true; }
+    if (upper == "EMAIL")                               { sendConsumerKey(KEY_MEDIA_EMAIL_READER);                 return true; }
+    if (upper == "CALCULATOR" || upper == "CALC")       { sendConsumerKey(KEY_MEDIA_CALCULATOR);                   return true; }
+    if (upper == "MYCOMPUTER")                          { sendConsumerKey(KEY_MEDIA_LOCAL_MACHINE_BROWSER);        return true; }
+    if (upper == "WWWSEARCH")                           { sendConsumerKey(KEY_MEDIA_WWW_SEARCH);                   return true; }
+    if (upper == "WWWBACK")                             { sendConsumerKey(KEY_MEDIA_WWW_BACK);                     return true; }
+    if (upper == "WWWSTOP")                             { sendConsumerKey(KEY_MEDIA_WWW_STOP);                     return true; }
+    if (upper == "BOOKMARKS")                           { sendConsumerKey(KEY_MEDIA_WWW_BOOKMARKS);                return true; }
+    if (upper == "MEDIASEL")                            { sendConsumerKey(KEY_MEDIA_CONSUMER_CONTROL_CONFIGURATION); return true; }
+    // System control keys
+    if (upper == "SYSTEMPOWER"|| upper == "SYSPOWER" || upper == "POWERDOWN")  { sendSystemKey(KEY_SYSTEM_POWER); return true; }
+    if (upper == "SYSTEMSLEEP"|| upper == "SYSSLEEP")                           { sendSystemKey(KEY_SYSTEM_SLEEP); return true; }
+    if (upper == "SYSTEMWAKE" || upper == "SYSWAKE"  || upper == "WAKEUP")      { sendSystemKey(KEY_SYSTEM_WAKE);  return true; }
+    return false;
+}
+
+// Dispatch a key token with an optional argument:
+//   {KEY}           — normal tap
+//   {KEY ms}        — hold for ms milliseconds
+//   {KEY press}     — press down only (no auto-release)
+//   {KEY release}   — release only
+static void dispatchKeyToken(const String& tokenRaw, std::map<String, String>& vars) {
+    String u = tokenRaw;
+    u.toUpperCase();
+    u.trim();
+
+    int sp = u.indexOf(' ');
+    String base = (sp >= 0) ? u.substring(0, sp) : u;
+    String arg  = (sp >= 0) ? u.substring(sp + 1) : String("");
+    arg.trim();
+
+    // Consumer / media keys — no hold/press/release variants
+    if (tryDispatchConsumerKey(base)) return;
+
+    uint8_t kc = resolveKeyToken(base);
+    if (!kc) return;
+
+    if (arg.length() == 0) {
+        sendSpecialKey(kc);
+    } else {
+        String argU = arg;
+        argU.toUpperCase();
+        if (argU == "PRESS") {
+            pressKey(kc);
+        } else if (argU == "RELEASE") {
+            releaseKey(kc);
+        } else {
+            int holdMs = evaluateAllTokens(arg, vars).toInt();
+            if (holdMs > 0) sendSpecialKeyTimed(kc, holdMs);
+            else            sendSpecialKey(kc);
+        }
+    }
 }
 
 // ---- Parser ----
@@ -427,25 +594,12 @@ void parseAndSendText(const String& text, std::map<String, String>& vars) {
         String u = token;
         u.toUpperCase();
 
-        if      (u == "ENTER")     sendSpecialKey(KEY_RETURN);
-        else if (u == "TAB")       sendSpecialKey(KEY_TAB);
-        else if (u == "ESC" || u == "ESCAPE") sendSpecialKey(KEY_ESC);
-        else if (u == "SPACE")     sendSpecialKey(KEY_SPACE);
-        else if (u == "BACKSPACE") sendSpecialKey(KEY_BACKSPACE);
-        else if (u == "DELETE")    sendSpecialKey(KEY_DELETE);
-        else if (u == "LEFT")      sendSpecialKey(KEY_LEFT_ARROW);
-        else if (u == "RIGHT")     sendSpecialKey(KEY_RIGHT_ARROW);
-        else if (u == "UP")        sendSpecialKey(KEY_UP_ARROW);
-        else if (u == "DOWN")      sendSpecialKey(KEY_DOWN_ARROW);
-        else if (u == "INSERT")    sendSpecialKey(KEY_INSERT);
-        else if (u == "HOME")      sendSpecialKey(KEY_HOME);
-        else if (u == "END")       sendSpecialKey(KEY_END);
-        else if (u == "PAGEUP")    sendSpecialKey(KEY_PAGE_UP);
-        else if (u == "PAGEDOWN")  sendSpecialKey(KEY_PAGE_DOWN);
-        else if (u == "PRINTSCREEN" || u == "SYSRQ") sendSpecialKey(KEY_PRINTSCREEN);
-        else if (u.startsWith("F") && u.length() <= 3) {
-            int n = u.substring(1).toInt();
-            if (n >= 1 && n <= 12) sendSpecialKey(KEY_F1 + (n - 1));
+        // ---- Key tokens with optional argument ----
+        if (isKeyToken(u.substring(0, u.indexOf(' ') >= 0 ? u.indexOf(' ') : u.length()))) {
+            dispatchKeyToken(token, vars);
+        }
+        else if (u == "RELEASEALL") {
+            hidReleaseAll();
         }
         else if (u == "BLUETOOTH_ENABLE")  enableBluetooth();
         else if (u == "BLUETOOTH_DISABLE") disableBluetooth();

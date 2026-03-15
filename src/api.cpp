@@ -125,6 +125,22 @@ void handleFileRead(String path) {
     }
 }
 
+void handleDocs() {
+    addCorsHeaders();
+    server.sendHeader("Connection", "close");
+    server.sendHeader("Cache-Control", "public, max-age=3600");
+    if (SPIFFS.exists("/TOKEN_REFERENCE.md")) {
+        File f = SPIFFS.open("/TOKEN_REFERENCE.md", "r");
+        if (f) {
+            server.streamFile(f, "text/markdown; charset=utf-8");
+            f.close();
+            return;
+        }
+    }
+    server.send(404, "text/plain", "TOKEN_REFERENCE.md not found on device");
+    server.client().stop();
+}
+
 void handleNotFound() {
     addCorsHeaders();
     server.sendHeader("Connection", "close");
@@ -852,6 +868,7 @@ void handleSettings() {
                     USB.begin();
                     if (usbKeyboardEnabled) { USBKeyboard.begin(); usbKeyboardReady = true; }
                     if (usbMouseEnabled)    { USBMouse.begin();    usbMouseReady    = true; }
+                    KProxConsumer.begin();
                     usbInitialized = true;
                 }
                 if (ledEnabled) setLED(usbEnabled ? LED_COLOR_USB_ENABLE : LED_COLOR_USB_DISABLE, 500);
@@ -1227,6 +1244,31 @@ void handleKeymap() {
     if (!checkApiKey()) return;
 
     if (server.method() == HTTP_GET) {
+        // ?id=xx  — return the raw JSON content of a specific keymap
+        if (server.hasArg("id")) {
+            String id = server.arg("id");
+            id.toLowerCase(); id.trim();
+            if (id == "en") {
+                // built-in English has no stored file; return empty map placeholder
+                sendEncrypted(200, "{\"id\":\"en\",\"name\":\"English (built-in)\",\"map\":[]}");
+            } else {
+                String path = "/keymaps/" + id + ".json";
+                if (SPIFFS.exists(path)) {
+                    File f = SPIFFS.open(path, "r");
+                    if (f) {
+                        String body = f.readString();
+                        f.close();
+                        sendEncrypted(200, body);
+                    } else {
+                        server.send(500, "application/json", "{\"error\":\"read failed\"}");
+                    }
+                } else {
+                    server.send(404, "application/json", "{\"error\":\"not found\"}");
+                }
+            }
+            server.client().stop();
+            return;
+        }
         JsonDocument doc;
         doc["active"] = keymapActive();
         JsonArray arr = doc["available"].to<JsonArray>();
@@ -1238,7 +1280,7 @@ void handleKeymap() {
         if (!canProceed()) return;
         JsonDocument doc;
         if (!parseJsonBody(doc)) { requestComplete(); return; }
-        if (doc.containsKey("keymap")) {
+        if (doc["keymap"].is<String>()) {
             String id = doc["keymap"].as<String>();
             id.toLowerCase();
             if (keymapLoad(id)) {
@@ -1431,6 +1473,7 @@ void setupRoutes() {
         }
     });
 
+    server.on("/api/docs",               HTTP_GET,     handleDocs);
     server.on("/api/nonce",              HTTP_GET,     handleNonce);
     server.on("/api/status",             HTTP_GET,     handleApiStatus);
     server.on("/api/settings",           HTTP_GET,     handleSettings);

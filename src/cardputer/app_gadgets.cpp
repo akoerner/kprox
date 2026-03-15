@@ -15,29 +15,43 @@ static constexpr char GH_LIST[]   = "/repos/akoerner/kprox/contents/gadgets";
 static constexpr char GH_RAW_HOST[] = "raw.githubusercontent.com";
 
 // ---- HTTPS GET helper ----
+// Uses HTTP/1.0 to avoid chunked transfer encoding, with a hard read timeout
+// and a per-byte watchdog feed so the WDT never trips during large responses.
 
 String AppGadgets::_httpGet(const char* host, const char* path) {
     if (WiFi.status() != WL_CONNECTED) return "";
 
     WiFiClientSecure client;
     client.setInsecure();
+    client.setTimeout(15);
     feedWatchdog();
+
     if (!client.connect(host, 443)) return "";
     feedWatchdog();
 
-    client.printf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: KProx/1.0\r\nConnection: close\r\n\r\n",
+    // HTTP/1.0 disables chunked transfer encoding so we can read the body as-is.
+    client.printf("GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: KProx/1.0\r\nAccept: application/json\r\nConnection: close\r\n\r\n",
                   path, host);
 
-    while (client.connected()) {
+    // Skip headers
+    unsigned long hdrDeadline = millis() + 10000UL;
+    while (client.connected() && millis() < hdrDeadline) {
         String line = client.readStringUntil('\n');
-        if (line == "\r") break;
         feedWatchdog();
+        line.trim();
+        if (line.length() == 0) break;
     }
 
+    // Read body with timeout
     String body;
-    while (client.available() || client.connected()) {
-        if (client.available()) body += (char)client.read();
-        feedWatchdog();
+    body.reserve(4096);
+    unsigned long bodyDeadline = millis() + 20000UL;
+    while ((client.available() || client.connected()) && millis() < bodyDeadline) {
+        while (client.available()) {
+            body += (char)client.read();
+            feedWatchdog();
+        }
+        if (client.connected()) delay(5);
     }
     client.stop();
     return body;
@@ -47,17 +61,29 @@ String AppGadgets::_httpGet(const char* host, const char* path) {
 
 bool AppGadgets::_fetchDirectory() {
     feedWatchdog();
-    String listing = _httpGet(GH_HOST, GH_LIST);
+
+    // Up to 3 attempts — GitHub API occasionally returns empty or truncated responses.
+    String listing;
+    for (int attempt = 0; attempt < 3 && listing.isEmpty(); attempt++) {
+        if (attempt > 0) { delay(1500); feedWatchdog(); }
+        listing = _httpGet(GH_HOST, GH_LIST);
+    }
+
     if (listing.isEmpty()) {
-        _errorMsg = "WiFi error or GitHub unreachable";
+        _errorMsg = "GitHub unreachable (check WiFi)";
         _state    = ST_ERROR;
         _needsRedraw = true;
         return false;
     }
 
+    // The GitHub API may prepend a rate-limit or redirect body; find the first '['
+    int arrayStart = listing.indexOf('[');
+    if (arrayStart > 0) listing = listing.substring(arrayStart);
+
     JsonDocument dir;
-    if (deserializeJson(dir, listing) || !dir.is<JsonArray>()) {
-        _errorMsg = "Failed to parse directory";
+    DeserializationError err = deserializeJson(dir, listing);
+    if (err || !dir.is<JsonArray>()) {
+        _errorMsg = String("Dir parse error: ") + err.c_str();
         _state    = ST_ERROR;
         _needsRedraw = true;
         return false;
@@ -73,7 +99,7 @@ bool AppGadgets::_fetchDirectory() {
 
     _totalFiles = _pendingNames.size();
     if (_totalFiles == 0) {
-        _errorMsg = "No gadgets found";
+        _errorMsg = "No gadgets found in repo";
         _state    = ST_ERROR;
         _needsRedraw = true;
         return false;
@@ -91,10 +117,18 @@ bool AppGadgets::_fetchNext() {
     _pendingNames.erase(_pendingNames.begin());
 
     feedWatchdog();
-    String rawPath = "/akoerner/kprox/master/gadgets/" + name;
-    String raw = _httpGet(GH_RAW_HOST, rawPath.c_str());
+    String rawPath = "/akoerner/kprox/main/gadgets/" + name;
+    String raw;
+    for (int attempt = 0; attempt < 2 && raw.isEmpty(); attempt++) {
+        if (attempt > 0) { delay(800); feedWatchdog(); }
+        raw = _httpGet(GH_RAW_HOST, rawPath.c_str());
+    }
 
     if (!raw.isEmpty()) {
+        // Trim to the first '{' in case the server prepends stray bytes
+        int objStart = raw.indexOf('{');
+        if (objStart > 0) raw = raw.substring(objStart);
+
         JsonDocument gdoc;
         if (!deserializeJson(gdoc, raw)) {
             JsonObject g = gdoc["gadget"];
@@ -105,8 +139,6 @@ bool AppGadgets::_fetchNext() {
                 gad.content     = g["content"]     | "";
                 if (!gad.content.isEmpty()) {
                     _gadgets.push_back(gad);
-                    // Switch to READY on first successful fetch so user can
-                    // browse while the rest continue loading in background
                     if (_state == ST_LOADING && !_gadgets.empty()) {
                         _state = ST_READY;
                         if (_page < 0) _page = 0;
@@ -198,7 +230,7 @@ void AppGadgets::_drawError() {
     uint16_t botBg = disp.color565(16, 16, 16);
     disp.fillRect(0, disp.height() - BOT_H, disp.width(), BOT_H, botBg);
     disp.setTextColor(disp.color565(100, 100, 100), botBg);
-    disp.drawString("ENTER retry  ESC back", 2, disp.height() - BOT_H + 2);
+    disp.drawString("ENTER/R retry  ESC back", 2, disp.height() - BOT_H + 2);
 }
 
 void AppGadgets::_drawGadget() {
@@ -278,15 +310,12 @@ void AppGadgets::onEnter() {
     _installMsg  = "";
     _installOk   = false;
     if (_gadgets.empty() && _state != ST_LOADING) {
-        _gadgets.clear();
-        _pendingNames.clear();
-        _totalFiles = 0;
-        _page       = 0;
-        _state      = ST_LOADING;
+        _state       = ST_LOADING;
+        _totalFiles  = 0;
+        _page        = 0;
         _needsRedraw = true;
-        _draw(); // show loading immediately
-        if (!_fetchDirectory()) return; // fills _pendingNames or sets ST_ERROR
-        // Fetch one file right away so the first result appears quickly
+        _draw();
+        if (!_fetchDirectory()) return;
         _fetchNext();
     } else if (!_gadgets.empty()) {
         _state = ST_READY;
@@ -307,12 +336,12 @@ void AppGadgets::onUpdate() {
     uiManager.notifyInteraction();
 
     if (_state == ST_ERROR) {
-        if (ki.enter) {
+        if (ki.enter || ki.ch == 'r' || ki.ch == 'R') {
             _gadgets.clear();
             _pendingNames.clear();
-            _totalFiles = 0;
-            _page       = 0;
-            _state      = ST_LOADING;
+            _totalFiles  = 0;
+            _page        = 0;
+            _state       = ST_LOADING;
             _needsRedraw = true;
             _draw();
             if (_fetchDirectory()) _fetchNext();

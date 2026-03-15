@@ -2040,6 +2040,12 @@ async function showTab(tabName) {
             // auto-load on first visit
         }
     }
+    if (tabName === 'keymap' && isConnected) {
+        await keymapEditorInit();
+    }
+    if (tabName === 'reference') {
+        await refLoad();
+    }
 }
 
 // ---- Credential Store ----
@@ -2542,22 +2548,202 @@ function populateReferenceTable() {
     });
 }
 
-function filterTable() {
-    const searchBox = document.getElementById('searchBox');
-    if (!searchBox) return;
-    
-    const searchTerm = searchBox.value.toLowerCase();
-    const rows = document.querySelectorAll('#referenceTableBody tr');
+// ---- Code Reference tab ----
 
-    rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        if (text.includes(searchTerm)) {
-            row.style.display = '';
-        } else {
-            row.style.display = 'none';
+let _refMd     = null;   // raw markdown string
+let _refView   = 'doc';  // 'doc' | 'char'
+let _refSections = [];   // [{heading, body, html, text}] for search
+
+function refSetView(v) {
+    _refView = v;
+    const docView  = document.getElementById('refDocView');
+    const charView = document.getElementById('refCharView');
+    const btnDoc   = document.getElementById('refBtnDoc');
+    const btnChar  = document.getElementById('refBtnChar');
+    if (!docView) return;
+    if (v === 'doc') {
+        docView.style.display  = '';
+        charView.style.display = 'none';
+        if (btnDoc)  { btnDoc.style.background=''; btnDoc.style.color=''; }
+        if (btnChar) { btnChar.style.background='#6c757d'; btnChar.style.color='#fff'; }
+    } else {
+        docView.style.display  = 'none';
+        charView.style.display = '';
+        if (btnChar) { btnChar.style.background=''; btnChar.style.color=''; }
+        if (btnDoc)  { btnDoc.style.background='#6c757d'; btnDoc.style.color='#fff'; }
+    }
+    refSearch();
+}
+
+// Minimal markdown to HTML renderer (headings, tables, code, bold, lists, hr, paragraphs)
+function _mdToHtml(md) {
+    const lines = md.split('\n');
+    const out = [];
+    let inTable = false, inList = false, inCode = false, codeLang = '', codeBuf = [];
+
+    const flushList = () => { if (inList) { out.push('</ul>'); inList = false; } };
+    const flushTable = () => { if (inTable) { out.push('</tbody></table>'); inTable = false; } };
+    const flushCode = () => {
+        if (inCode) {
+            const escaped = codeBuf.join('\n').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            out.push(`<pre style="background:#f8f9fa;padding:10px;border-radius:4px;overflow-x:auto;font-size:12px;"><code>${escaped}</code></pre>`);
+            codeBuf = []; inCode = false; codeLang = '';
         }
+    };
+
+    const inlineFormat = s =>
+        s.replace(/`([^`]+)`/g, '<code style="background:#f0f0f0;padding:1px 4px;border-radius:3px;font-size:12px;">$1</code>')
+         .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+         .replace(/\*([^*]+)\*/g, '<em>$1</em>');
+
+    for (let i = 0; i < lines.length; i++) {
+        const raw = lines[i];
+        const line = raw.trimEnd();
+
+        // fenced code block
+        if (line.startsWith('```')) {
+            if (inCode) { flushCode(); continue; }
+            flushList(); flushTable();
+            inCode = true; codeLang = line.slice(3).trim(); continue;
+        }
+        if (inCode) { codeBuf.push(raw); continue; }
+
+        // HR
+        if (/^[-*_]{3,}$/.test(line.trim())) {
+            flushList(); flushTable();
+            out.push('<hr style="border:none;border-top:1px solid #dee2e6;margin:16px 0;">');
+            continue;
+        }
+
+        // Headings
+        const hm = line.match(/^(#{1,4})\s+(.*)/);
+        if (hm) {
+            flushList(); flushTable();
+            const lvl = hm[1].length;
+            const tag = 'h' + (lvl + 1);  // h2-h5 (h1 reserved for page title)
+            const styles = [
+                'margin:20px 0 6px;font-size:15px;border-bottom:1px solid #dee2e6;padding-bottom:4px;',
+                'margin:16px 0 4px;font-size:13px;',
+                'margin:12px 0 4px;font-size:12px;',
+                'margin:10px 0 3px;font-size:12px;',
+            ][lvl - 1] || '';
+            out.push(`<${tag} style="${styles}">${inlineFormat(hm[2])}</${tag}>`);
+            continue;
+        }
+
+        // Table rows
+        if (line.startsWith('|')) {
+            const cells = line.split('|').slice(1,-1).map(c => c.trim());
+            if (/^[\s|:-]+$/.test(line)) {
+                // separator row — do nothing
+                continue;
+            }
+            if (!inTable) {
+                flushList();
+                out.push('<table style="width:100%;font-size:12px;border-collapse:collapse;margin-bottom:10px;">');
+                // first row is header
+                out.push('<thead><tr>' + cells.map(c => `<th style="padding:5px 8px;text-align:left;border:1px solid #dee2e6;background:#f8f9fa;">${inlineFormat(c)}</th>`).join('') + '</tr></thead><tbody>');
+                inTable = true;
+            } else {
+                out.push('<tr>' + cells.map(c => `<td style="padding:4px 8px;border:1px solid #dee2e6;">${inlineFormat(c)}</td>`).join('') + '</tr>');
+            }
+            continue;
+        }
+        if (inTable && !line.startsWith('|')) { flushTable(); }
+
+        // List items
+        if (/^[\-\*] /.test(line)) {
+            if (!inList) { out.push('<ul style="margin:4px 0 8px 18px;font-size:12px;">'); inList = true; }
+            out.push(`<li>${inlineFormat(line.slice(2))}</li>`);
+            continue;
+        }
+        if (inList && line.trim() !== '') { flushList(); }
+
+        // Blank line
+        if (line.trim() === '') {
+            flushList(); flushTable();
+            continue;
+        }
+
+        // Paragraph
+        flushList(); flushTable();
+        out.push(`<p style="margin:4px 0 8px;font-size:13px;">${inlineFormat(line)}</p>`);
+    }
+    flushCode(); flushList(); flushTable();
+    return out.join('\n');
+}
+
+// Parse markdown into searchable sections (split on ## headings)
+function _mdToSections(md) {
+    const sections = [];
+    let cur = { heading: '', lines: [] };
+    for (const line of md.split('\n')) {
+        if (line.startsWith('## ') || line.startsWith('# ')) {
+            if (cur.lines.length || cur.heading) sections.push(cur);
+            cur = { heading: line.replace(/^#+\s+/, ''), lines: [] };
+        } else {
+            cur.lines.push(line);
+        }
+    }
+    if (cur.lines.length || cur.heading) sections.push(cur);
+    return sections.map(s => {
+        const body = s.lines.join('\n');
+        return { heading: s.heading, body, html: _mdToHtml((s.heading ? '## ' + s.heading + '\n' : '') + body), text: (s.heading + ' ' + body).toLowerCase() };
     });
 }
+
+async function refLoad() {
+    const el = document.getElementById('refDocContent');
+    if (!el) return;
+    if (_refMd) { _renderRef(); return; }  // already loaded
+    el.innerHTML = '<p style="color:#6c757d;font-size:13px;">Loading token reference...</p>';
+    try {
+        const endpoint = getApiEndpoint ? getApiEndpoint() : '';
+        const resp = await fetch(endpoint + '/api/docs');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        _refMd = await resp.text();
+        _refSections = _mdToSections(_refMd);
+        _renderRef();
+    } catch(e) {
+        el.innerHTML = '<p style="color:#dc3545;font-size:13px;">Could not load token reference: ' + e.message + '. Connect to device first.</p>';
+    }
+}
+
+function _renderRef(filter) {
+    const el = document.getElementById('refDocContent');
+    if (!el || !_refSections.length) return;
+    if (!filter) {
+        el.innerHTML = _refSections.map(s => s.html).join('');
+    } else {
+        const q = filter.toLowerCase();
+        const matched = _refSections.filter(s => s.text.includes(q));
+        if (matched.length === 0) {
+            el.innerHTML = '<p style="color:#6c757d;font-size:13px;">No results for "' + _esc(filter) + '"</p>';
+        } else {
+            el.innerHTML = matched.map(s => {
+                // highlight matching text
+                const re = new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\$&') + ')', 'gi');
+                return s.html.replace(re, '<mark style="background:#fff3cd;">$1</mark>');
+            }).join('');
+        }
+    }
+}
+
+function refSearch() {
+    const q = (document.getElementById('searchBox')?.value || '').trim();
+    if (_refView === 'doc') {
+        if (_refSections.length) _renderRef(q || null);
+    } else {
+        // char table filter
+        const rows = document.querySelectorAll('#referenceTableBody tr');
+        rows.forEach(row => {
+            row.style.display = q === '' || row.textContent.toLowerCase().includes(q.toLowerCase()) ? '' : 'none';
+        });
+    }
+}
+
+// Legacy alias kept for any remaining onclick="filterTable()" references
+function filterTable() { refSearch(); }
 
 function toggleTokenExamples(section = 'controls') {
     const content = document.getElementById(`tokenExamplesContent${section === 'controls' ? 'Controls' : 'Registers'}`);
@@ -4406,106 +4592,321 @@ async function clearMTLSCerts() {
     }
 }
 
-// ---- Keymap ----
+// ---- Keymap Editor ----
 
-async function loadKeymapSettings() {
+let _keymapRows  = [];   // [{char, key, mod}]
+let _keymapId    = '';
+let _keymapName  = '';
+let _keymapDirty = false;
+let _keymapActive = 'en';
+
+function _kmStatus(msg, ok) {
+    const el = document.getElementById('keymapStatus');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.color = ok ? '#28a745' : '#dc3545';
+    if (msg) setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 5000);
+}
+
+async function keymapEditorInit() {
     try {
         const resp = await apiFetch('/api/keymap');
         if (!resp.ok) return;
         const data = await resp.json();
-        const activeEl = document.getElementById('keymapActive');
-        const selectEl = document.getElementById('keymapSelect');
-        if (activeEl) activeEl.textContent = data.active || 'en';
-        if (selectEl && data.available) {
-            const current = selectEl.value;
-            selectEl.innerHTML = '';
-            data.available.forEach(id => {
-                const opt = document.createElement('option');
-                opt.value = id;
-                opt.textContent = id;
-                if (id === (data.active || 'en')) opt.selected = true;
-                selectEl.appendChild(opt);
-            });
-        }
-    } catch (e) {
-        console.warn('loadKeymapSettings:', e.message);
+        _keymapActive = data.active || 'en';
+
+        const sel = document.getElementById('keymapSelect');
+        if (!sel) return;
+        sel.innerHTML = '<option value="">-- select keymap --</option>';
+        (data.available || []).forEach(id => {
+            const opt = document.createElement('option');
+            opt.value = id;
+            opt.textContent = id + (id === _keymapActive ? ' (active)' : '');
+            sel.appendChild(opt);
+        });
+        _updateActiveBadge();
+
+        // Also update the settings tab selector if it exists
+        const settingsSel = document.getElementById('keymapActive');
+        if (settingsSel) settingsSel.textContent = _keymapActive;
+    } catch(e) {
+        _kmStatus('Load error: ' + e.message, false);
     }
 }
 
-async function setKeymap() {
-    const selectEl = document.getElementById('keymapSelect');
-    const statusEl = document.getElementById('keymapStatus');
-    if (!selectEl || !selectEl.value) return;
+function _updateActiveBadge() {
+    const el = document.getElementById('keymapActiveBadge');
+    if (el) el.textContent = 'Active keymap: ' + _keymapActive;
+    const delBtn = document.getElementById('keymapDeleteBtn');
+    if (delBtn) {
+        const sel = document.getElementById('keymapSelect');
+        delBtn.disabled = !sel?.value || sel.value === 'en';
+    }
+}
+
+async function keymapSelected() {
+    const sel = document.getElementById('keymapSelect');
+    const id  = sel?.value;
+    _updateActiveBadge();
+    if (!id) { document.getElementById('keymapEditorArea').style.display = 'none'; return; }
+    await _keymapLoad(id);
+}
+
+async function _keymapLoad(id) {
+    try {
+        const resp = await apiFetch('/api/keymap?id=' + encodeURIComponent(id));
+        if (!resp.ok) throw new Error(resp.statusText);
+        const data = await resp.json();
+        _keymapId    = id;
+        _keymapName  = data.name || id;
+        _keymapRows  = (data.map || []).map(e => ({char: e.char||'', key: Number(e.key||0), mod: Number(e.mod||0)}));
+        _keymapDirty = false;
+        _renderTable();
+        document.getElementById('keymapEditorTitle').textContent = _keymapName + ' (' + id + ')';
+        document.getElementById('keymapEditorArea').style.display = '';
+        _syncRawJson();
+    } catch(e) {
+        _kmStatus('Load error: ' + e.message, false);
+    }
+}
+
+function _modLabel(mod) {
+    if (!mod) return '—';
+    const parts = [];
+    if (mod & 2)  parts.push('Shift');
+    if (mod & 4)  parts.push('Alt');
+    if (mod & 8)  parts.push('GUI');
+    if (mod & 64) parts.push('AltGr');
+    const rem = mod & ~(2|4|8|64);
+    if (rem) parts.push('0x'+rem.toString(16));
+    return parts.join('+');
+}
+
+function _renderTable() {
+    const tbody = document.getElementById('keymapTableBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const isBuiltin = _keymapId === 'en';
+    _keymapRows.forEach((row, i) => {
+        const tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid #dee2e6';
+        if (isBuiltin) {
+            tr.innerHTML = `
+                <td style="padding:4px 8px;border:1px solid #dee2e6;">${_esc(row.char)}</td>
+                <td style="padding:4px 8px;border:1px solid #dee2e6;">${row.key}</td>
+                <td style="padding:4px 8px;border:1px solid #dee2e6;">${row.mod}</td>
+                <td style="padding:4px 8px;border:1px solid #dee2e6;color:#6c757d;">${_modLabel(row.mod)}</td>
+                <td style="padding:4px 8px;border:1px solid #dee2e6;text-align:center;color:#aaa;">—</td>`;
+        } else {
+            tr.innerHTML = `
+                <td style="padding:2px 4px;border:1px solid #dee2e6;">
+                    <input type="text" maxlength="4" value="${_esc(row.char)}" style="width:44px;font-size:13px;" data-i="${i}" data-f="char" onchange="_rowChange(this)">
+                </td>
+                <td style="padding:2px 4px;border:1px solid #dee2e6;">
+                    <input type="number" min="0" max="255" value="${row.key}" style="width:60px;font-size:13px;" data-i="${i}" data-f="key" onchange="_rowChange(this)">
+                </td>
+                <td style="padding:2px 4px;border:1px solid #dee2e6;">
+                    <input type="number" min="0" max="255" value="${row.mod}" style="width:60px;font-size:13px;" data-i="${i}" data-f="mod" onchange="_rowChange(this)">
+                </td>
+                <td style="padding:2px 4px;border:1px solid #dee2e6;color:#6c757d;font-size:11px;" id="modlabel_${i}">${_modLabel(row.mod)}</td>
+                <td style="padding:2px 4px;border:1px solid #dee2e6;text-align:center;">
+                    <button onclick="_rowDelete(${i})" style="padding:1px 6px;background:#dc3545;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px;">✕</button>
+                </td>`;
+        }
+        tbody.appendChild(tr);
+    });
+}
+
+function _esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function _rowChange(input) {
+    const i = Number(input.dataset.i);
+    const f = input.dataset.f;
+    if (f === 'char') {
+        _keymapRows[i].char = input.value;
+    } else if (f === 'key') {
+        _keymapRows[i].key  = Number(input.value) || 0;
+    } else if (f === 'mod') {
+        _keymapRows[i].mod  = Number(input.value) || 0;
+        const lbl = document.getElementById('modlabel_' + i);
+        if (lbl) lbl.textContent = _modLabel(_keymapRows[i].mod);
+    }
+    _keymapDirty = true;
+    _syncRawJson();
+}
+
+function _rowDelete(i) {
+    _keymapRows.splice(i, 1);
+    _keymapDirty = true;
+    _renderTable();
+    _syncRawJson();
+}
+
+function keymapAddRow() {
+    _keymapRows.push({char: '', key: 0, mod: 0});
+    _keymapDirty = true;
+    _renderTable();
+    _syncRawJson();
+    // Scroll to bottom of table
+    const t = document.getElementById('keymapTable');
+    if (t) t.scrollIntoView({block:'end', behavior:'smooth'});
+}
+
+function _buildJson() {
+    return JSON.stringify({id: _keymapId, name: _keymapName, map: _keymapRows}, null, 2);
+}
+
+function _syncRawJson() {
+    const ta = document.getElementById('keymapRawJson');
+    if (ta && document.getElementById('keymapRawArea')?.style.display !== 'none') {
+        ta.value = _buildJson();
+    }
+}
+
+function keymapToggleRaw() {
+    const area = document.getElementById('keymapRawArea');
+    if (!area) return;
+    const showing = area.style.display !== 'none';
+    area.style.display = showing ? 'none' : '';
+    if (!showing) {
+        document.getElementById('keymapRawJson').value = _buildJson();
+    }
+}
+
+function keymapApplyRaw() {
+    const ta = document.getElementById('keymapRawJson');
+    if (!ta) return;
+    try {
+        const data = JSON.parse(ta.value);
+        if (!Array.isArray(data.map)) throw new Error('Missing "map" array');
+        _keymapName = data.name || _keymapId;
+        _keymapRows = data.map.map(e => ({char: String(e.char||''), key: Number(e.key||0), mod: Number(e.mod||0)}));
+        _keymapDirty = true;
+        _renderTable();
+        document.getElementById('keymapEditorTitle').textContent = _keymapName + ' (' + _keymapId + ')';
+        _kmStatus('Raw JSON applied.', true);
+    } catch(e) {
+        _kmStatus('JSON parse error: ' + e.message, false);
+    }
+}
+
+async function keymapSave() {
+    if (!_keymapId || _keymapId === 'en') { _kmStatus('Cannot save built-in keymap.', false); return; }
+    const json = _buildJson();
+    try {
+        const resp = await apiFetch('/api/keymap', {
+            method: 'PUT',
+            body: JSON.stringify({id: _keymapId, json})
+        });
+        if (!resp.ok) { const e = await resp.json(); throw new Error(e.error || resp.statusText); }
+        _keymapDirty = false;
+        _kmStatus('Saved: ' + _keymapId, true);
+    } catch(e) {
+        _kmStatus('Save error: ' + e.message, false);
+    }
+}
+
+async function keymapSetActive() {
+    const sel = document.getElementById('keymapSelect');
+    const id  = sel?.value;
+    if (!id) { _kmStatus('Select a keymap first.', false); return; }
     try {
         const resp = await apiFetch('/api/keymap', {
             method: 'POST',
-            body: JSON.stringify({ keymap: selectEl.value })
+            body: JSON.stringify({keymap: id})
         });
-        if (!resp.ok) {
-            const err = await resp.json();
-            throw new Error(err.error || resp.statusText);
-        }
-        if (statusEl) { statusEl.textContent = 'Keymap set to: ' + selectEl.value; statusEl.style.color = '#28a745'; }
-        await loadKeymapSettings();
-    } catch (e) {
-        if (statusEl) { statusEl.textContent = 'Error: ' + e.message; statusEl.style.color = '#dc3545'; }
+        if (!resp.ok) { const e = await resp.json(); throw new Error(e.error || resp.statusText); }
+        _keymapActive = id;
+        _kmStatus('Active keymap set to: ' + id, true);
+        await keymapEditorInit();
+    } catch(e) {
+        _kmStatus('Error: ' + e.message, false);
     }
 }
 
-async function uploadKeymap() {
-    const fileInput = document.getElementById('keymapFile');
-    const statusEl  = document.getElementById('keymapStatus');
-    if (!fileInput || !fileInput.files.length) {
-        if (statusEl) { statusEl.textContent = 'Select a .json file first.'; statusEl.style.color = '#dc3545'; }
-        return;
-    }
-    const file = fileInput.files[0];
-    const id   = file.name.replace(/\.json$/i, '').toLowerCase();
-
-    if (!id || id === 'en') {
-        if (statusEl) { statusEl.textContent = 'Invalid filename (use e.g. de.json).'; statusEl.style.color = '#dc3545'; }
-        return;
-    }
-
-    try {
-        const json = await file.text();
-        // Validate it parses as JSON before sending
-        JSON.parse(json);
-
-        await apiFetch('/api/keymap', {
-            method: 'PUT',
-            body: JSON.stringify({ id, json })
-        });
-
-        if (statusEl) { statusEl.textContent = 'Uploaded keymap: ' + id; statusEl.style.color = '#28a745'; }
-        fileInput.value = '';
-        await loadKeymapSettings();
-    } catch (e) {
-        if (statusEl) { statusEl.textContent = 'Error: ' + e.message; statusEl.style.color = '#dc3545'; }
-    }
-}
-
-async function deleteKeymap() {
-    const selectEl = document.getElementById('keymapSelect');
-    const statusEl = document.getElementById('keymapStatus');
-    const id = selectEl?.value;
-    if (!id || id === 'en') {
-        if (statusEl) { statusEl.textContent = 'Cannot delete built-in keymap.'; statusEl.style.color = '#dc3545'; }
-        return;
-    }
+async function keymapDeleteSelected() {
+    const sel = document.getElementById('keymapSelect');
+    const id  = sel?.value;
+    if (!id || id === 'en') { _kmStatus('Cannot delete built-in keymap.', false); return; }
     if (!confirm('Delete keymap "' + id + '"?')) return;
     try {
         const resp = await apiFetch('/api/keymap', {
             method: 'DELETE',
-            body: JSON.stringify({ keymap: id })
+            body: JSON.stringify({keymap: id})
         });
-        if (!resp.ok) {
-            const err = await resp.json();
-            throw new Error(err.error || resp.statusText);
-        }
-        if (statusEl) { statusEl.textContent = 'Deleted: ' + id; statusEl.style.color = '#28a745'; }
-        await loadKeymapSettings();
-    } catch (e) {
-        if (statusEl) { statusEl.textContent = 'Error: ' + e.message; statusEl.style.color = '#dc3545'; }
+        if (!resp.ok) { const e = await resp.json(); throw new Error(e.error || resp.statusText); }
+        _keymapDirty = false;
+        document.getElementById('keymapEditorArea').style.display = 'none';
+        _keymapId = '';
+        _kmStatus('Deleted: ' + id, true);
+        await keymapEditorInit();
+    } catch(e) {
+        _kmStatus('Error: ' + e.message, false);
     }
 }
+
+async function keymapCreate() {
+    const input = document.getElementById('keymapNewId');
+    const id    = (input?.value || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+    if (!id || id === 'en') { _kmStatus('Enter a valid id (a-z, 0-9, -).', false); return; }
+    // Create an empty keymap skeleton and upload it
+    const json = JSON.stringify({id, name: id, map: []});
+    try {
+        const resp = await apiFetch('/api/keymap', {
+            method: 'PUT',
+            body: JSON.stringify({id, json})
+        });
+        if (!resp.ok) { const e = await resp.json(); throw new Error(e.error || resp.statusText); }
+        if (input) input.value = '';
+        _kmStatus('Created: ' + id, true);
+        await keymapEditorInit();
+        // Select and load the new keymap
+        const sel = document.getElementById('keymapSelect');
+        if (sel) { sel.value = id; await keymapSelected(); }
+    } catch(e) {
+        _kmStatus('Error: ' + e.message, false);
+    }
+}
+
+async function keymapUploadFile() {
+    const fi = document.getElementById('keymapFileInput');
+    if (!fi?.files.length) return;
+    const file = fi.files[0];
+    const id   = file.name.replace(/\.json$/i, '').toLowerCase().replace(/[^a-z0-9-]/g, '');
+    if (!id || id === 'en') { _kmStatus('Invalid filename — use e.g. de.json', false); fi.value=''; return; }
+    try {
+        const json = await file.text();
+        const parsed = JSON.parse(json);  // validate
+        const resp = await apiFetch('/api/keymap', {
+            method: 'PUT',
+            body: JSON.stringify({id, json})
+        });
+        if (!resp.ok) { const e = await resp.json(); throw new Error(e.error || resp.statusText); }
+        fi.value = '';
+        _kmStatus('Uploaded: ' + id, true);
+        await keymapEditorInit();
+        const sel = document.getElementById('keymapSelect');
+        if (sel) { sel.value = id; await keymapSelected(); }
+    } catch(e) {
+        fi.value = '';
+        _kmStatus('Upload error: ' + e.message, false);
+    }
+}
+
+function keymapDownload() {
+    if (!_keymapId) return;
+    const blob = new Blob([_buildJson()], {type: 'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = _keymapId + '.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+// Legacy aliases used by settings tab
+async function loadKeymapSettings() { return keymapEditorInit(); }
+async function setKeymap()          { return keymapSetActive(); }
+async function uploadKeymap()       { return keymapUploadFile(); }
+async function deleteKeymap()       { return keymapDeleteSelected(); }
