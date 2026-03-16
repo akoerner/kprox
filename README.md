@@ -15,6 +15,8 @@ Typical applications: unlocking unattended machines, mouse jiggling, canned text
 
 ![KProx](web/kprox.png)
 
+---
+
 > ### ⚠️ Ethical Use Warning
 >
 > This software, firmware, source code, and all associated artifacts are
