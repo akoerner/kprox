@@ -122,9 +122,32 @@ All API endpoints require authentication. Requests are authenticated with an HMA
 
 ### Credential Store
 
-The credential store is a separate encrypted vault for secrets used in token strings (passwords, API keys, etc.). It uses AES-256-CTR + HMAC-SHA256 keyed from a user-supplied store key that is **never written to flash**. The store key lives only in volatile RAM and is cleared on lock or reboot. The store itself is persisted to NVS (survives firmware flashes).
+> #### ⚠️ Unverified Cryptographic Security — Credential Store
+>
+> The credential store uses a self-contained KDBX 3.1 implementation written specifically for this project. It has **not been audited or verified** by security professionals. The KeePass format implementation, AES-KDF key derivation, AES-256-CBC encryption, Salsa20 inner stream, and all supporting cryptographic code are provided as-is for educational and hobbyist use only. Do not use this to protect sensitive or production credentials.
+
+The credential store is an on-device [KeePass](https://keepass.info/) database (KDBX 3.1 format) stored in NVS. Because it is standard KDBX, the database file can be downloaded and opened with any compatible client — [KeePassXC](https://keepassxc.org/), [KeePass 2](https://keepass.info/), or any Android/iOS KeePass app.
+
+The database is encrypted with AES-256-CBC using a key derived via AES-KDF (6000 rounds). Protected string values inside the XML payload use a Salsa20 inner stream. All credential metadata — labels, count, and values — is inside the encrypted payload. Nothing is readable at rest without the key.
+
+The store key lives only in volatile RAM and is cleared on lock or reboot. The database itself is persisted to NVS and survives firmware OTA updates (only a full chip erase would destroy it).
 
 The store has two states: **locked** (default after boot) and **unlocked**. Unlock via the web interface **Credential Store** tab or the `/api/credstore` API endpoint. Once unlocked, `{CREDSTORE label}` tokens in registers are substituted with the decrypted value at playback time.
+
+**Gate modes** control what is required to unlock:
+
+| Mode | Unlock requirement |
+|------|--------------------|
+| Key only | Symmetric passphrase (min 8 chars) |
+| Key + TOTP | PIN (min 4 chars) then a TOTP code from an authenticator app |
+| TOTP only | TOTP code alone — the gate secret is the encryption key; NTP sync required |
+
+**Security features:**
+
+- Auto-lock after configurable inactivity period (0 = disabled)
+- Auto-wipe after N consecutive failed unlock attempts — destroys the KDBX database and all TOTP secrets (0 = disabled)
+- Failed attempt counter persisted in NVS; survives reboots
+- Both thresholds require the store to be unlocked to change
 
 > **Note:** Register contents are stored in plaintext on flash. Do not store secrets directly in registers — use the credential store instead.
 
@@ -147,11 +170,17 @@ The Cardputer ADV has a display and keyboard. Use arrow keys to navigate the lau
 | App | Description |
 |-----|-------------|
 | **KProx** | Main register playback and status. Shows active register, content preview, IP, SSID, hostname, and credential store lock state. |
-| **CredStore** | 3-page credential store manager: Status/Unlock · Change Key · Wipe Store. Type your key directly to unlock. |
+| **FuzzyProx** | Fuzzy-search across all registers by name or content. |
+| **RegEdit** | Full-screen register editor with token syntax. |
+| **CredStore** | Credential store manager: Status/Unlock (with auto-lock countdown and failed-attempt badges) · Add/Update credentials · Key & Gate (rekey, switch to TOTP gate, TOTP-only) · Wipe Store. |
 | **Gadgets** | Browse and install community gadgets from GitHub. Requires WiFi. ENTER installs to a new register. |
-| **Keyboard HID** | Direct keyboard input forwarding |
-| **Clock** | Current time display (requires NTP) |
-| **Settings** | Per-page settings: Connectivity · WiFi Settings · API Key · Device Identity |
+| **SinkProx** | View and flush the sink buffer (unauthenticated write-only text accumulator). |
+| **Keyboard HID** | Direct keyboard input forwarding. |
+| **Clock** | Current time and NTP sync status. |
+| **QRProx** | Displays a QR code of the device web interface URL. BtnG0 types the URL. |
+| **SchedProx** | Scheduled task manager — create, edit, enable/disable time-triggered token string playback. |
+| **TOTProx** | TOTP authenticator — manage accounts, view live codes with countdown bars, configure the credential store gate. BtnG0 types the current code. |
+| **Settings** | 11-page settings: WiFi · Bluetooth · USB HID · API Key · Device Identity · Sink Config · HID Timing · Startup App · App Layout · CS Security |
 
 ![Splash](img/kprox_cardputer_adv_splash.png)
 ![WiFi connect](img/kprox_cardputer_adv_wifi_connect.png)
@@ -224,12 +253,13 @@ The token string DSL supports:
 
 - **Keyboard output** — plain text, special keys, key chords, raw HID
 - **Mouse control** — absolute/relative movement, clicks, press/release
-- **Credential injection** — `{CREDSTORE label}` substitutes secrets from the encrypted store
+- **Credential injection** — `{CREDSTORE label}` substitutes secrets from the encrypted KeePass store
+- **TOTP** — `{TOTP name}` inserts the current 6-digit code for a named TOTProx account
 - **Loops** — infinite, timed, counter (`LOOP`/`FOR`/`WHILE`) with `BREAK`
 - **Variables** — `{SET varname expr}` with full expression evaluation
 - **Conditionals** — `{IF left op right}..{ELSE}..{ENDIF}`
 - **Math** — `{MATH expr}` with arithmetic, trig, floor/ceil/round, constants PI and E
-- **Random** — `{RAND min max}`
+- **Random** — `{RAND}` (CSPRNG 32-bit integer) or `{RAND min max}` (range)
 - **Timing** — `{SLEEP ms}`, `{SCHEDULE HH:MM}`
 - **Keymap** — `{KEYMAP id}` to switch keyboard layouts mid-string
 - **System** — Bluetooth/USB toggle, halt/resume, WiFi connect
