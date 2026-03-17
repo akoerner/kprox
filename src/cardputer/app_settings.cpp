@@ -3,6 +3,7 @@
 #include "../globals.h"
 #include "app_settings.h"
 #include "../storage.h"
+#include "../credential_store.h"
 #include "../connection.h"
 #include "../hid.h"
 #include "../registers.h"
@@ -31,7 +32,7 @@ void AppSettings::_drawTopBar(int pageNum) {
     static const char* pageLabels[NUM_PAGES] = {
         "WiFi Settings", "Bluetooth", "USB HID", "API Key",
         "Device Identity", "Sink Config", "HID Timing 1/2", "HID Timing 2/2",
-        "Startup App", "App Layout"
+        "Startup App", "App Layout", "CS Security"
     };
     disp.drawString(pageLabels[pageNum], 4, 3);
 
@@ -684,9 +685,9 @@ void AppSettings::_drawPage8() {
     static const char* APP_NAMES[] = {
         "KProx", "FuzzyProx", "RegEdit", "CredStore",
         "Gadgets", "SinkProx", "Keyboard", "Clock",
-        "QRProx", "SchedProx", "Settings"
+        "QRProx", "SchedProx", "TOTProx", "Settings"
     };
-    static constexpr int N_APPS = 11; // indices 1..11 in uiManager
+    static constexpr int N_APPS = 12;
 
     int y = CONTENT_Y;
     disp.setTextSize(1);
@@ -730,7 +731,7 @@ void AppSettings::_drawPage8() {
 }
 
 void AppSettings::_handlePage8(KeyInput ki) {
-    static constexpr int N = 11;
+    static constexpr int N = 12;
     if (ki.arrowLeft)  { _page = 7; _timingSel = 0; _editing = false; _idSaved = false; _needsRedraw = true; }
     else if (ki.arrowRight) { _page = 9; _idSel = 0; _needsRedraw = true; }
     else if (ki.arrowUp)   { _idSel = (_idSel - 1 + N) % N; _idSaved = false; _needsRedraw = true; }
@@ -748,9 +749,9 @@ void AppSettings::_handlePage8(KeyInput ki) {
 static const char* APP_LAYOUT_NAMES[] = {
     "KProx", "FuzzyProx", "RegEdit", "CredStore",
     "Gadgets", "SinkProx", "Keyboard", "Clock",
-    "QRProx", "SchedProx", "Settings"
+    "QRProx", "SchedProx", "TOTProx", "Settings"
 };
-static constexpr int N_LAYOUT_APPS = 11;
+static constexpr int N_LAYOUT_APPS = 12;
 
 void AppSettings::_drawPage9() {
     auto& disp = M5Cardputer.Display;
@@ -780,7 +781,7 @@ void AppSettings::_drawPage9() {
         bool hidden = appHidden[slot];
         bool sel    = (_idSel == slot);
 
-        uint16_t rowBg = sel ? selBgColor() : (uint16_t)SETTINGS_BG;
+        uint16_t rowBg = sel ? (_editing ? disp.color565(80,40,0) : selBgColor()) : (uint16_t)SETTINGS_BG;
         if (sel) disp.fillRect(0, y - 1, disp.width(), 14, rowBg);
 
         // Position indicator
@@ -822,7 +823,10 @@ void AppSettings::_drawPage9() {
         disp.drawString("Saved!", 4, disp.height() - BAR_BOT_H - 14);
     }
 
-    _drawBottomBar("up/dn select  ENTER toggle  H=hide  </> move  ESC");
+    if (_editing)
+        _drawBottomBar("up/dn MOVE  ENTER/ESC done  H toggle");
+    else
+        _drawBottomBar("up/dn cursor  ENTER reorder  H hide  </> page");
 }
 
 void AppSettings::_handlePage9(KeyInput ki) {
@@ -831,38 +835,185 @@ void AppSettings::_handlePage9(KeyInput ki) {
     }
     while ((int)appHidden.size() < (int)appOrder.size()) appHidden.push_back(false);
 
-    if (ki.arrowLeft && !ki.fn) {
-        // Move selected app one position earlier in the order
-        if (_idSel > 0 && appOrder[_idSel] != N_LAYOUT_APPS) {
+    // Left/right = page navigation (always)
+    if (ki.arrowLeft && !_editing) {
+        _page = 8; _idSel = 0; _idSaved = false; _editing = false; _needsRedraw = true; return;
+    }
+    if (ki.arrowRight && !_editing) {
+        _page = 10; _idSel = 0; _editing = false; _needsRedraw = true; return;
+    }
+
+    if (!_editing) {
+        // Up/down = move cursor
+        if (ki.arrowUp)   { _idSel = (_idSel - 1 + N_LAYOUT_APPS) % N_LAYOUT_APPS; _idSaved = false; _needsRedraw = true; return; }
+        if (ki.arrowDown) { _idSel = (_idSel + 1) % N_LAYOUT_APPS;                  _idSaved = false; _needsRedraw = true; return; }
+
+        // ENTER = enter reorder mode for selected item (Settings always fixed)
+        if (ki.enter && appOrder[_idSel] != N_LAYOUT_APPS) {
+            _editing = true; _needsRedraw = true; return;
+        }
+
+        // H = toggle hidden without entering reorder mode
+        if ((ki.ch == 'h' || ki.ch == 'H') && appOrder[_idSel] != N_LAYOUT_APPS) {
+            appHidden[_idSel] = !appHidden[_idSel];
+            saveAppLayout(); _idSaved = true; _needsRedraw = true;
+        }
+    } else {
+        // Reorder mode: up/down moves the item, ENTER/ESC exits
+        if (ki.arrowUp && _idSel > 0) {
             std::swap(appOrder[_idSel], appOrder[_idSel - 1]);
             std::swap(appHidden[_idSel], appHidden[_idSel - 1]);
             _idSel--;
-            saveAppLayout(); _idSaved = true;
-        } else {
-            _page = 8; _idSel = 0; _editing = false; _idSaved = false;
+            saveAppLayout(); _idSaved = true; _needsRedraw = true; return;
         }
-        _needsRedraw = true; return;
-    }
-    if (ki.arrowRight && !ki.fn) {
-        // Move selected app one position later
-        if (_idSel < N_LAYOUT_APPS - 1 && appOrder[_idSel] != N_LAYOUT_APPS) {
+        if (ki.arrowDown && _idSel < N_LAYOUT_APPS - 1) {
             std::swap(appOrder[_idSel], appOrder[_idSel + 1]);
             std::swap(appHidden[_idSel], appHidden[_idSel + 1]);
             _idSel++;
-            saveAppLayout(); _idSaved = true;
-        } else if (_idSel == N_LAYOUT_APPS - 1) {
-            _page = 0; _needsRedraw = true; return;  // wrap
+            saveAppLayout(); _idSaved = true; _needsRedraw = true; return;
         }
-        _needsRedraw = true; return;
+        if (ki.enter || ki.esc) {
+            _editing = false; _needsRedraw = true; return;
+        }
     }
-    if (ki.arrowUp)   { _idSel = (_idSel - 1 + N_LAYOUT_APPS) % N_LAYOUT_APPS; _idSaved = false; _needsRedraw = true; return; }
-    if (ki.arrowDown) { _idSel = (_idSel + 1) % N_LAYOUT_APPS;                  _idSaved = false; _needsRedraw = true; return; }
+}
 
-    // ENTER or H — toggle hidden (Settings app always stays visible)
-    if ((ki.enter || ki.ch == 'h' || ki.ch == 'H') && appOrder[_idSel] != N_LAYOUT_APPS) {
-        appHidden[_idSel] = !appHidden[_idSel];
-        saveAppLayout(); _idSaved = true; _needsRedraw = true;
+// ---- Page 10: CS Security (auto-lock, auto-wipe) ----
+
+void AppSettings::_drawPage10() {
+    auto& disp = M5Cardputer.Display;
+    disp.fillScreen(SETTINGS_BG);
+    _drawTopBar(10);
+
+    int y = CONTENT_Y;
+    disp.setTextSize(1);
+
+    if (credStoreLocked) {
+        disp.setTextColor(disp.color565(200, 100, 50), SETTINGS_BG);
+        disp.drawString("Unlock CredStore first", 4, y + 10);
+        disp.drawString("to change these settings.", 4, y + 24);
+        // Still show current values and failed counter read-only
+        y += 46;
+        disp.setTextColor(disp.color565(130, 130, 130), SETTINGS_BG);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "Auto-lock: %ds", csAutoLockSecs);
+        disp.drawString(buf, 4, y); y += 14;
+        snprintf(buf, sizeof(buf), "Auto-wipe: %d fails", csAutoWipeAttempts);
+        disp.drawString(buf, 4, y); y += 14;
+        int fails = csGetFailedAttempts();
+        char failStr[32];
+        if (csAutoWipeAttempts > 0)
+            snprintf(failStr, sizeof(failStr), "Fails: %d/%d", fails, csAutoWipeAttempts);
+        else
+            snprintf(failStr, sizeof(failStr), "Fails: %d", fails);
+        disp.setTextColor(fails > 0 ? disp.color565(220, 80, 80) : disp.color565(80, 200, 80), SETTINGS_BG);
+        disp.drawString(failStr, 4, y);
+        _drawBottomBar("Unlock CredStore to edit  </>");
+        return;
     }
+
+    // Auto-lock row
+    bool lockSel = (_toggleSel == 0);
+    uint16_t lockBg = lockSel ? selBgColor() : (uint16_t)SETTINGS_BG;
+    if (lockSel) disp.fillRect(0, y-1, disp.width(), 14, lockBg);
+    disp.setTextColor(labelColor(), lockBg);
+    disp.drawString("Auto-lock (secs, 0=off):", 4, y);
+    char lockVal[12]; snprintf(lockVal, sizeof(lockVal), "%d", csAutoLockSecs);
+    if (_editing && lockSel) {
+        String buf = _editBuf + "_";
+        int bx = disp.width() - disp.textWidth(buf.c_str()) - 8;
+        disp.setTextColor(TFT_YELLOW, lockBg);
+        disp.drawString(buf.c_str(), bx, y);
+    } else {
+        int vw = disp.textWidth(lockVal);
+        disp.setTextColor(lockSel ? TFT_WHITE : labelColor(), lockBg);
+        disp.drawString(lockVal, disp.width() - vw - 8, y);
+    }
+    y += 18;
+
+    // Auto-wipe row
+    bool wipeSel = (_toggleSel == 1);
+    uint16_t wipeBg = wipeSel ? selBgColor() : (uint16_t)SETTINGS_BG;
+    if (wipeSel) disp.fillRect(0, y-1, disp.width(), 14, wipeBg);
+    disp.setTextColor(labelColor(), wipeBg);
+    disp.drawString("Auto-wipe after N fails:", 4, y);
+    char wipeVal[12]; snprintf(wipeVal, sizeof(wipeVal), "%d", csAutoWipeAttempts);
+    if (_editing && wipeSel) {
+        String buf = _editBuf + "_";
+        int bx = disp.width() - disp.textWidth(buf.c_str()) - 8;
+        disp.setTextColor(TFT_YELLOW, wipeBg);
+        disp.drawString(buf.c_str(), bx, y);
+    } else {
+        int vw = disp.textWidth(wipeVal);
+        disp.setTextColor(wipeSel ? TFT_WHITE : labelColor(), wipeBg);
+        disp.drawString(wipeVal, disp.width() - vw - 8, y);
+    }
+    y += 18;
+
+    // Failed attempts counter
+    int fails = csGetFailedAttempts();
+    disp.setTextColor(disp.color565(130, 130, 130), SETTINGS_BG);
+    disp.drawString("Failed unlock attempts:", 4, y);
+    char failVal[12]; snprintf(failVal, sizeof(failVal), "%d", fails);
+    uint16_t fc = fails > 0 ? disp.color565(220, 80, 80) : disp.color565(80, 200, 80);
+    disp.setTextColor(fc, SETTINGS_BG);
+    disp.drawString(failVal, disp.width() - disp.textWidth(failVal) - 8, y);
+    y += 18;
+
+    // Reset fails shortcut
+    disp.setTextColor(disp.color565(80, 130, 80), SETTINGS_BG);
+    disp.drawString("R = reset failed counter", 4, y);
+
+    if (_idSaved) {
+        disp.setTextColor(TFT_GREEN, SETTINGS_BG);
+        disp.drawString("Saved!", 4, disp.height() - BAR_BOT_H - 14);
+    }
+
+    _drawBottomBar("up/dn select  ENTER edit  R=reset fails  </>");
+}
+
+void AppSettings::_handlePage10(KeyInput ki) {
+    if (ki.arrowLeft && !_editing) {
+        _page = 9; _toggleSel = 0; _editing = false; _editBuf = ""; _needsRedraw = true; return;
+    }
+    if (ki.arrowRight && !_editing) {
+        _page = 0; _toggleSel = 0; _editing = false; _editBuf = ""; _needsRedraw = true; return;
+    }
+
+    // Navigation works even when locked; editing does not
+    if (credStoreLocked) { _needsRedraw = true; return; }
+
+    if (!_editing) {
+        if (ki.arrowUp)   { _toggleSel = (_toggleSel - 1 + 2) % 2; _needsRedraw = true; return; }
+        if (ki.arrowDown) { _toggleSel = (_toggleSel + 1) % 2;     _needsRedraw = true; return; }
+
+        if (ki.ch == 'r' || ki.ch == 'R') {
+            csResetFailedAttempts();
+            _idSaved = true; _needsRedraw = true; return;
+        }
+
+        if (ki.enter) {
+            _editing = true;
+            _editBuf = (_toggleSel == 0) ? String(csAutoLockSecs) : String(csAutoWipeAttempts);
+            _needsRedraw = true; return;
+        }
+        return;
+    }
+
+    // Editing
+    if (ki.esc || ki.enter) {
+        if (ki.enter && _editBuf.length() > 0) {
+            int val = _editBuf.toInt();
+            if (val < 0) val = 0;
+            if (_toggleSel == 0) csAutoLockSecs     = val;
+            else                  csAutoWipeAttempts = val;
+            saveCsSecuritySettings();
+            _idSaved = true;
+        }
+        _editing = false; _editBuf = ""; _needsRedraw = true; return;
+    }
+    if (ki.del && _editBuf.length() > 0) { _editBuf.remove(_editBuf.length()-1); _needsRedraw = true; return; }
+    if (ki.ch >= '0' && ki.ch <= '9' && (int)_editBuf.length() < 6) { _editBuf += ki.ch; _needsRedraw = true; }
 }
 
 // ---- AppBase overrides ----
@@ -912,6 +1063,7 @@ void AppSettings::onUpdate() {
             case 7: _drawPage7(); break;  // HID Timing 2/2
             case 8: _drawPage8(); break;  // Startup App
             case 9: _drawPage9(); break;  // App Layout
+            case 10: _drawPage10(); break; // CS Security
         }
         _needsRedraw = false;
     }
@@ -938,6 +1090,7 @@ void AppSettings::onUpdate() {
         case 7: _handlePage7(ki); break;  // HID Timing 2/2
         case 8: _handlePage8(ki); break;  // Startup App
         case 9: _handlePage9(ki); break;  // App Layout
+        case 10: _handlePage10(ki); break; // CS Security
     }
 }
 

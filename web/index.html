@@ -13,6 +13,7 @@
                 if (sep) sep.value = ep;
             });
         </script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     </head>
     <body>
         <div class="container">
@@ -39,6 +40,17 @@
                         <span id="globalCsLockBadge" style="display:inline-block;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:11px;background:#6c757d;color:#fff;">UNKNOWN</span>
                     </div>
                     <div style="font-size:11px;color:#adb5bd;margin-top:2px;" id="globalCsCountLabel"></div>
+                    <div style="display:flex;gap:4px;margin-top:3px;flex-wrap:wrap;">
+                        <span id="globalCsAutoLockBadge" style="display:none;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;background:#0d4f8c;color:#fff;"></span>
+                        <span id="globalCsFailedBadge"   style="display:none;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;background:#721c24;color:#fff;"></span>
+                    </div>
+                </div>
+
+                <div class="status-item">
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <div class="status-label">NTP</div>
+                        <span id="globalNtpBadge" style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:#343a40;color:#adb5bd;">unknown</span>
+                    </div>
                 </div>
 
                 <div class="status-item">
@@ -121,7 +133,9 @@
                     <div class="tab" onclick="showTab('settings')">Settings</div>
                     <div class="tab" onclick="showTab('schedtasks')">Scheduled Tasks</div>
                     <div class="tab" onclick="showTab('reference')">Code Reference</div>
+                    <div class="tab" onclick="showTab('apiref')">API Reference</div>
                     <div class="tab" onclick="showTab('credstore')">Credential Store</div>
+                    <div class="tab" onclick="showTab('totprox')">TOTProx</div>
                     <div class="tab" onclick="showTab('gadgets')">Gadgets</div>
                     <div class="tab" onclick="showTab('keymap')">Keymap Editor</div>
                 </div>
@@ -498,7 +512,8 @@
                                 <option value="8">Clock</option>
                                 <option value="9">QRProx</option>
                                 <option value="10">SchedProx</option>
-                                <option value="11">Settings</option>
+                                <option value="11">TOTProx</option>
+                                <option value="12">Settings</option>
                             </select>
                             <div class="settings-hint">App launched automatically on device boot. Takes effect after reboot.</div>
                         </div>
@@ -552,6 +567,31 @@
                     </div>
 
                     <div class="section settings-section">
+                        <h3>Credential Store Security</h3>
+                        <p class="settings-hint" style="margin-bottom:8px;">Auto-lock closes the credential store after a period of inactivity. Auto-wipe destroys the KDBX database and all TOTP secrets after too many failed unlock attempts. Set either to 0 to disable.</p>
+                        <div id="csSecurityLockedNote" style="display:none;padding:7px 10px;background:#fff3cd;border:1px solid #ffc107;border-radius:4px;font-size:12px;color:#856404;margin-bottom:10px;">
+                            🔒 The credential store must be unlocked to change these settings or reset the failed attempts counter.
+                        </div>
+                        <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+                            <div class="settings-field" style="flex:0 0 200px;">
+                                <label class="settings-label">Auto-lock (seconds) <span class="settings-default">0 = disabled</span></label>
+                                <input type="number" id="csAutoLockInput" min="0" value="0" style="width:100%;" />
+                            </div>
+                            <div class="settings-field" style="flex:0 0 200px;">
+                                <label class="settings-label">Auto-wipe after N fails <span class="settings-default">0 = disabled</span></label>
+                                <input type="number" id="csAutoWipeInput" min="0" value="0" style="width:100%;" />
+                            </div>
+                            <button onclick="saveCsSecuritySettings()" style="margin-bottom:2px;">Save</button>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                            <span style="font-size:13px;color:#495057;">Failed unlock attempts:</span>
+                            <span id="csFailedAttemptsVal" style="font-size:13px;font-weight:600;color:#dc3545;">0</span>
+                            <button onclick="csResetFails()" style="padding:2px 10px;font-size:11px;background:#6c757d;">Reset Counter</button>
+                        </div>
+                        <div id="csSecurityStatus" class="settings-status"></div>
+                    </div>
+
+                    <div class="section settings-section">
                         <h3>System Controls</h3>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;">
                             <button onclick="wipeSettings()" class="danger-btn" style="width:auto;margin-bottom:0;">Wipe Settings</button>
@@ -589,24 +629,62 @@
                     </div>
                 </div>
 
+                <!-- API REFERENCE TAB -->
+                <div id="apiref-tab" class="tab-content">
+                    <div class="section">
+                        <h3>API Reference</h3>
+                        <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap;">
+                            <input type="text" id="apirefSearch" class="search-box"
+                                   placeholder="Search endpoints, fields, actions..."
+                                   oninput="apirefSearch()" style="flex:1;min-width:200px;">
+                            <button onclick="apirefLoad(true)" style="font-size:12px;padding:3px 12px;background:#6c757d;">Reload</button>
+                        </div>
+                        <div id="apirefContent" style="font-size:13px;line-height:1.6;">
+                            <p style="color:#6c757d;">Open this tab to load the API reference.</p>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- CREDENTIAL STORE TAB -->
                 <div id="credstore-tab" class="tab-content">
                     <div class="section">
                         <h3>Credential Store</h3>
                         <div id="credStoreStatus" style="margin-bottom:14px;padding:10px;border-radius:6px;background:#f8f9fa;border:1px solid #dee2e6;">
-                            <span id="credStoreLockBadge" style="display:inline-block;padding:3px 10px;border-radius:4px;font-weight:bold;font-size:13px;margin-right:10px;background:#dc3545;color:#fff;">LOCKED</span>
-                            <span id="credStoreCountLabel" style="font-size:13px;color:#495057;">– credentials</span>
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                <span id="credStoreLockBadge" style="display:inline-block;padding:3px 10px;border-radius:4px;font-weight:bold;font-size:13px;background:#dc3545;color:#fff;">LOCKED</span>
+                                <span id="credStoreCountLabel" style="font-size:13px;color:#495057;">– credentials</span>
+                                <span id="csAutoLockBadge" style="display:none;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:#0d4f8c;color:#fff;"></span>
+                                <span id="csFailedBadge" style="display:none;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:#721c24;color:#fff;"></span>
+                                <span id="csNtpBadge" style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:#343a40;color:#adb5bd;margin-left:auto;">NTP: unknown</span>
+                                <button onclick="csRefreshStatus()" style="padding:2px 10px;font-size:11px;background:#6c757d;color:#fff;border:none;border-radius:3px;cursor:pointer;">Refresh</button>
+                            </div>
                         </div>
                         <div style="margin-bottom:18px;padding:12px;border:1px solid #dee2e6;border-radius:6px;">
                             <h4 style="margin:0 0 10px;">Lock / Unlock</h4>
+                            <!-- Gate mode hint -->
+                            <div id="csGateModeHint" style="font-size:12px;color:#6c757d;margin-bottom:8px;display:none;"></div>
                             <form id="csUnlockForm" onsubmit="csUnlock(event)" autocomplete="on">
                                 <input type="text" name="username" autocomplete="username" value="kprox-credstore" style="display:none;" readonly>
-                                <input type="password" id="csKeyInput" name="password" autocomplete="current-password" placeholder="Credential store key" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-bottom:8px;">
+                                <!-- Symmetric key / PIN field — hidden in TOTP-only mode -->
+                                <div id="csKeyRow">
+                                    <input type="password" id="csKeyInput" name="password" autocomplete="current-password"
+                                           placeholder="Credential store key" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-bottom:6px;">
+                                </div>
+                                <!-- TOTP code field — shown in TOTP and TOTP-only modes -->
+                                <div id="csTotpRow" style="display:none;">
+                                    <input type="text" id="csTotpInput" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+                                           autocomplete="one-time-code" placeholder="6-digit TOTP code"
+                                           style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-bottom:6px;font-family:monospace;letter-spacing:4px;">
+                                </div>
                                 <div style="display:flex;gap:8px;">
                                     <button type="submit" style="flex:1;">Unlock</button>
                                     <button type="button" onclick="csLock()" style="flex:1;background:#6c757d;">Lock</button>
                                 </div>
                             </form>
+                            <!-- First-time setup hint — shown when no database exists yet -->
+                            <div id="csFirstTimeHint" style="display:none;margin-top:8px;padding:8px 10px;background:#e8f4fd;border:1px solid #b8daff;border-radius:4px;font-size:12px;color:#004085;">
+                                💡 No credential store found. Enter a key above and click <strong>Unlock</strong> to create a new encrypted KeePass database.
+                            </div>
                             <div id="csLockStatus" style="font-size:12px;margin-top:6px;"></div>
                         </div>
                         <div style="margin-bottom:18px;padding:12px;border:1px solid #dee2e6;border-radius:6px;">
@@ -624,11 +702,15 @@
                             <div id="csCredentialList" style="font-size:13px;color:#6c757d;font-style:italic;">Unlock the store to view credentials.</div>
                         </div>
                         <div style="padding:12px;border:1px solid #ffc107;border-radius:6px;background:#fffbf0;margin-bottom:14px;">
-                            <h4 style="margin:0 0 10px;color:#856404;">Change Store Key</h4>
+                            <h4 style="margin:0 0 6px;color:#856404;">Change Store Key</h4>
+                            <p id="csRekeyHint" style="font-size:12px;color:#6c757d;margin:0 0 10px;">
+                                Re-encrypts all credentials with a new key. Store must be unlocked. Min 8 chars for key-only mode; min 4 chars for PIN+TOTP mode.
+                            </p>
                             <form id="csRekeyForm" onsubmit="csRekey(event)" autocomplete="on">
                                 <input type="text" name="username" autocomplete="username" value="kprox-credstore" style="display:none;" readonly>
                                 <input type="password" id="csOldKey" name="current-password" autocomplete="current-password" placeholder="Current key" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-bottom:6px;">
-                                <input type="password" id="csNewKey" name="new-password" autocomplete="new-password" placeholder="New key (min 8 chars)" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-bottom:6px;">
+                                <input type="password" id="csNewKey" name="new-password" autocomplete="new-password" id="csNewKeyInput"
+                                       placeholder="New key" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-bottom:6px;">
                                 <input type="password" id="csNewKeyConfirm" autocomplete="new-password" placeholder="Confirm new key" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-bottom:8px;">
                                 <button type="submit" style="width:100%;background:#856404;color:#fff;">Change Key</button>
                             </form>
@@ -639,6 +721,145 @@
                             <button onclick="csWipe()" style="width:100%;background:#dc3545;color:#fff;">Wipe Credential Store</button>
                             <div style="font-size:11px;color:#6c757d;margin-top:5px;">Deletes all credentials and the key check. Cannot be undone.</div>
                             <div id="csWipeStatus" style="font-size:12px;margin-top:6px;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TOTPROX TAB -->
+                <div id="totprox-tab" class="tab-content">
+                    <div class="section">
+                        <h3>TOTProx — TOTP Authenticator</h3>
+                        <p class="settings-hint" style="margin-bottom:14px;">Manage TOTP accounts and the credential store gate. Accounts are stored on-device. Use <code>{TOTP name}</code> in any token string to type the current 6-digit code inline.</p>
+
+                        <!-- Status row -->
+                        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;">
+                            <span id="totpTimeStatus" style="font-size:12px;padding:3px 10px;border-radius:4px;background:#343a40;color:#adb5bd;">Time: unknown</span>
+                            <span id="totpGateStatus" style="font-size:12px;padding:3px 10px;border-radius:4px;background:#343a40;color:#adb5bd;">Gate: off</span>
+                            <button onclick="loadTOTP()" style="padding:3px 12px;font-size:12px;background:#6c757d;">Refresh</button>
+                        </div>
+
+                        <!-- Account list -->
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                            <h4 style="margin:0;">Accounts</h4>
+                        </div>
+                        <div id="totpAccountList" style="margin-bottom:18px;font-size:13px;color:#6c757d;font-style:italic;">Connect to load accounts.</div>
+
+                        <!-- Add account -->
+                        <div style="padding:14px;border:1px solid #dee2e6;border-radius:6px;margin-bottom:18px;">
+                            <h4 style="margin:0 0 10px;">Add Account</h4>
+                            <div id="totpAddLockedWarn" style="display:none;padding:8px 10px;background:#fff3cd;border:1px solid #ffc107;border-radius:4px;font-size:12px;color:#856404;margin-bottom:10px;">
+                                Unlock the credential store first — TOTP secrets are encrypted with it.
+                            </div>
+                            <div class="settings-grid settings-grid-wide" style="margin-bottom:8px;">
+                                <div class="settings-field">
+                                    <label class="settings-label">Name</label>
+                                    <input type="text" id="totpNewName" placeholder="e.g. github" autocomplete="off" />
+                                </div>
+                                <div class="settings-field">
+                                    <label class="settings-label">Base32 Secret</label>
+                                    <input type="text" id="totpNewSecret" placeholder="JBSWY3DPEHPK3PXP" autocomplete="off"
+                                           style="font-family:monospace;" />
+                                    <div class="settings-hint">From the TOTP setup QR code. Letters and digits 2–7 only.</div>
+                                </div>
+                            </div>
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                                <label style="font-size:13px;">Digits:
+                                    <select id="totpNewDigits" style="margin-left:4px;">
+                                        <option value="6" selected>6</option>
+                                        <option value="8">8</option>
+                                    </select>
+                                </label>
+                                <label style="font-size:13px;">Period:
+                                    <select id="totpNewPeriod" style="margin-left:4px;">
+                                        <option value="30" selected>30s</option>
+                                        <option value="60">60s</option>
+                                    </select>
+                                </label>
+                                <button onclick="totpAddAccount()" style="margin-left:auto;">Add Account</button>
+                            </div>
+                            <div id="totpAddStatus" class="settings-status"></div>
+                        </div>
+
+                        <!-- Credential store gate -->
+                        <div style="padding:14px;border:1px solid #dee2e6;border-radius:6px;margin-bottom:18px;">
+                            <h4 style="margin:0 0 6px;">Credential Store Gate</h4>
+                            <p class="settings-hint" style="margin-bottom:10px;">
+                                Controls what is required to unlock the credential store.
+                                <strong>Off</strong> — symmetric key only (existing behaviour).
+                                <strong>Key + TOTP</strong> — enter the key first, then a live TOTP code.
+                                <strong>TOTP only</strong> — the TOTP code <em>is</em> the unlock; no separate key needed. If NTP is unavailable the store cannot be unlocked.
+                            </p>
+
+                            <div class="settings-field" style="max-width:320px;margin-bottom:10px;">
+                                <label class="settings-label">Mode</label>
+                                <select id="totpGateMode" style="width:100%;" onchange="totpGateModeChanged()">
+                                    <option value="0">Off — symmetric key only</option>
+                                    <option value="1">Key + TOTP — key then code</option>
+                                    <option value="2">TOTP only — code replaces key</option>
+                                </select>
+                            </div>
+
+                            <!-- New symmetric key — shown when leaving TOTP-only mode -->
+                            <div id="totpNewKeyRow" style="display:none;">
+                                <div class="settings-field" style="max-width:320px;margin-bottom:6px;">
+                                    <label class="settings-label">New Encryption Key <span class="settings-default" id="totpNewKeyHint">min 8 chars</span></label>
+                                    <input type="password" id="totpNewKeyForGate" placeholder="New key for the store"
+                                           autocomplete="new-password" style="width:100%;box-sizing:border-box;" />
+                                    <div class="settings-hint">Required when leaving TOTP-only mode. All credentials will be re-encrypted with this key.</div>
+                                </div>
+                            </div>
+
+                            <div class="settings-field" style="max-width:320px;margin-bottom:10px;">
+                                <label class="settings-label">TOTP Gate Secret <span class="settings-default">leave blank to keep existing</span></label>
+                                <input type="text" id="totpGateSecret" placeholder="Base32 secret"
+                                       autocomplete="off" style="font-family:monospace;width:100%;box-sizing:border-box;"
+                                       oninput="totpGateSecretChanged()" />
+                                <div class="settings-hint">Required for Key+TOTP and TOTP-only modes. Store this separately — it is not recoverable from the device.</div>
+                            </div>
+
+                            <!-- QR code for gate secret -->
+                            <div id="totpGateQrWrap" style="display:none;margin-bottom:12px;">
+                                <div style="font-size:12px;color:#6c757d;margin-bottom:6px;">
+                                    Scan with any TOTP app (Google Authenticator, Aegis, etc.)
+                                </div>
+                                <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+                                    <div id="totpGateQr" style="background:#fff;padding:8px;display:inline-block;border-radius:4px;"></div>
+                                    <div>
+                                        <div style="font-size:11px;color:#6c757d;margin-bottom:4px;">URI</div>
+                                        <code id="totpGateUri" style="font-size:10px;word-break:break-all;color:#495057;"></code>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <hr style="border:none;border-top:1px solid #dee2e6;margin:12px 0;">
+
+                            <h5 style="margin:0 0 6px;font-size:13px;">CS Encryption Key</h5>
+                            <p class="settings-hint" style="margin-bottom:8px;">
+                                The symmetric key that encrypts all stored credentials. Set this when using <em>Off</em> or <em>Key+TOTP</em> mode.
+                                If the store is currently unlocked, all credentials will be re-encrypted with the new key immediately.
+                                If locked, the new key takes effect on next unlock (the old key is discarded).
+                            </p>
+                            <div class="settings-field" style="max-width:320px;margin-bottom:6px;">
+                                <label class="settings-label">New CS Key <span class="settings-default">min 8 chars</span></label>
+                                <input type="password" id="totpCsNewKey" placeholder="New encryption key"
+                                       autocomplete="new-password" style="width:100%;box-sizing:border-box;" />
+                            </div>
+                            <div class="settings-field" style="max-width:320px;margin-bottom:10px;">
+                                <label class="settings-label">Confirm New CS Key</label>
+                                <input type="password" id="totpCsConfirmKey" placeholder="Repeat new key"
+                                       autocomplete="new-password" style="width:100%;box-sizing:border-box;" />
+                            </div>
+
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                <button onclick="totpSaveGate()">Save Gate Mode</button>
+                                <button onclick="totpSetCsKey()" style="background:#856404;color:#fff;">Set CS Key</button>
+                            </div>
+                            <div id="totpGateStatus2" class="settings-status"></div>
+                        </div>
+
+                        <!-- Danger -->
+                        <div>
+                            <button onclick="totpWipe()" class="danger-btn" style="width:auto;">Wipe All TOTP Data</button>
                         </div>
                     </div>
                 </div>

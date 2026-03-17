@@ -178,6 +178,11 @@ extern int        currentMouseY;
 // ---- Sink ----
 extern int maxSinkSize; // 0 = unlimited
 
+// Credential store security settings
+extern int           csAutoLockSecs;       // 0 = disabled
+extern int           csAutoWipeAttempts;   // 0 = disabled
+extern unsigned long credStoreLastActivity; // millis() of last HID output or button press
+
 // ---- Runtime-configurable HID timing (ms) ----
 extern int g_keyPressDelay;
 extern int g_keyReleaseDelay;

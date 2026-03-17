@@ -182,7 +182,7 @@ void AppSinkProx::_draw() {
     disp.drawString(("curl -X POST http://" + baseMdns + "/api/sink").c_str(), 4, y); y += 9;
     disp.drawString("  -H \"Content-Type: text/plain\"", 4, y); y += 9;
     disp.drawString("  --data-binary \"your data here\"", 4, y); y += 11;
-    disp.setTextSize(0);
+    disp.setTextSize(1);
 
     // Status message
     if (_statusMsg.length() > 0) {

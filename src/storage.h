@@ -41,6 +41,8 @@ void saveDefaultAppSettings();
 void loadDefaultAppSettings();
 
 void saveAppLayout();
+void saveCsSecuritySettings();
+void loadCsSecuritySettings();
 void loadAppLayout(int numApps);
 
 void wipeAllSettings();

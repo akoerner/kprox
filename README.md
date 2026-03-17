@@ -15,8 +15,6 @@ Typical applications: unlocking unattended machines, mouse jiggling, canned text
 
 ![KProx](web/kprox.png)
 
----
-
 > ### ⚠️ Ethical Use Warning
 >
 > This software, firmware, source code, and all associated artifacts are
@@ -272,94 +270,6 @@ Types: `Sum 1-100 = 5050`
 ```
 
 ---
-
-## Cardputer Apps
-
-The Cardputer launcher displays all enabled apps as scrollable icons. Navigate with **`<`** / **`>`**, select with **`ENTER`**. Press **`BtnG0`** (the orange side button) from any app to play the active register. The active app, order, and visibility are configurable from [Settings → App Layout](#settings) or the web interface.
-
----
-
-### KProx
-
-The main register player and device status screen. Shows the active register index and a content preview alongside the device IP, SSID, and hostname. Navigate registers with **`<`** / **`>`**, play the active register with **`ENTER`** or a single **`BtnG0`** press. Type a number then **`ENTER`** to jump directly to that register. Double-press **`BtnG0`** to advance to the next register. Hold **`BtnG0`** for 2 seconds to toggle halt/resume — halting stops all in-progress HID playback. The credential-store lock state is shown in the header.
-
----
-
-### FuzzyProx
-
-A fuzzy-search register picker. Type any part of a register name or content to filter the list in real time; matches are ranked by consecutive character runs. Navigate results with **`↑`** / **`↓`**. Press **`ENTER`** on a result to set it as the active register; press **`ENTER`** again (when it is already active) to play it immediately. Press **`BtnG0`** to play the current active register from anywhere in the list. Hold **`BtnG0`** for 2 seconds to halt/resume. The active register is marked with `*`.
-
----
-
-### RegEdit
-
-A full-screen register editor. Browse registers with **`<`** / **`>`**. Press **`E`** to edit the content of the selected register — the editor supports a visible block cursor, arrow-key navigation (with **`fn`** held), newline insertion with **`ENTER`**, and backspace with **`DEL`**. Exit edit mode with **`fn+``** (backtick); you will be prompted to save or discard. Press **`R`** to rename a register, **`N`** to create a new empty one, **`M`** to enter move mode (reorder with **`<`** / **`>`**, confirm with **`ENTER`**), and **`DEL`** to delete the current register after confirmation. **`fn+X`** deletes all registers after a second confirmation.
-
----
-
-### CredStore
-
-The on-device encrypted credential store. Credentials are key/value pairs (e.g. `admin_pass → s3cr3t`) accessible inline via the `{CREDSTORE label}` token. The store must be unlocked with its PIN before credentials can be read. From the app you can unlock/lock the store, add new entries, view and delete existing ones, and change the PIN. When locked, `{CREDSTORE …}` tokens resolve to an empty string. The lock state is shown in the header of KProx and FuzzyProx.
-
----
-
-### Gadgets
-
-A curated library of pre-built token-string automations fetched from the KProx GitHub repository over WiFi. Each gadget has a name, description, and a token-string payload. Browse with **`<`** / **`>`**, press **`ENTER`** to load a gadget into the active register, or **`P`** to play it immediately without overwriting the register. Requires an active WiFi connection to fetch the gadget list; the list is cached in memory for the session. Press **`R`** to refresh from the repository.
-
----
-
-### SinkProx
-
-Visualises the sink buffer — a write-only staging area that any HTTP client can POST raw text or token strings to without authentication (`POST /api/sink`). The app shows the current buffer size, a preview of the contents, and the device endpoints. Press **`ENTER`** or **`BtnG0`** to flush the buffer, replaying it as HID keystrokes and clearing it. Press **`D`** to delete the buffer without flushing. Press **`H`** or **`?`** to toggle the built-in help page. Hold **`BtnG0`** for 2 seconds to halt/resume playback.
-
----
-
-### Keyboard
-
-Passes every key typed on the Cardputer keyboard directly to the connected host as a raw HID keystroke — effectively turning the Cardputer into a standalone USB/BLE keyboard. Special keys (arrows, function keys, modifiers) are forwarded transparently. Press **`BtnG0`** to return to the launcher.
-
----
-
-### Clock
-
-Displays the current time and date synchronised via NTP (requires WiFi). The time is shown in large text at the centre of the screen. Press **`↑`** / **`↓`** to cycle through timezone presets (UTC−12 through UTC+14); the selected offset is persisted and applied to all scheduled task comparisons. If no NTP sync has occurred, dashes are shown in place of the time. The current IP address is shown in the header when connected.
-
----
-
-### QRProx
-
-Displays a QR code encoding the device's web interface URL (`http://<ip>`). Scan the code with a phone camera to open the web interface without typing the address. The right panel shows the URL, IP, mDNS hostname, and current SSID as text. If WiFi is not connected, a "No WiFi" message is shown instead. Press **`BtnG0`** to type the URL (`http://<ip>`) as HID keystrokes into the currently focused host application. Press any keyboard key to refresh.
-
----
-
-### SchedProx
-
-Creates and manages scheduled tasks — token strings that fire automatically when the device clock matches a configured date/time. Each task has a label, a datetime pattern (year/month/day/hour/minute/second, where `0` matches any value), a payload (any valid token string), a repeat flag (re-fires every matching second rather than once), and an enabled toggle.
-
-The add form uses an inline datetime editor: navigate fields with **`←`** / **`→`**, adjust values with **`↑`** / **`↓`** or type digits directly. Navigate between sections (label, datetime, payload, options, save) with **`↑`** / **`↓`** and confirm each with **`ENTER`**. From the task list, press **`D`** to delete the selected task and **`E`** from the detail view to toggle it on or off. Requires WiFi + NTP for time comparison.
-
----
-
-### Settings
-
-Device configuration, cycled with **`BtnG0`** or **`<`** / **`>`**:
-
-| Page | Contents |
-|------|----------|
-| **WiFi** | Enable/disable WiFi, connect to a new SSID/password |
-| **Bluetooth** | Enable BLE, toggle BLE keyboard and mouse sub-devices, reconnect |
-| **USB HID** | Enable USB, toggle USB keyboard, mouse, and FIDO2/CTAP2 |
-| **API Key** | View (masked) and replace the HMAC API key |
-| **Device Identity** | USB manufacturer, product name, mDNS hostname, USB serial number |
-| **Sink Config** | Set the maximum sink buffer size in bytes (0 = unlimited) |
-| **HID Timing 1/2** | Key press delay, key release delay, between-keys delay |
-| **HID Timing 2/2** | Send-text delay, special/media key delay, token execution delay |
-| **Startup App** | Choose which app launches automatically on boot |
-| **App Layout** | Reorder apps in the launcher with **`←`** / **`>`**, toggle visibility with **`ENTER`** or **`H`**. Settings cannot be hidden. |
-
-On timing pages, press **`BtnG0`** to play the active register as a live test of the current timing values.
-
 
 ## API
 

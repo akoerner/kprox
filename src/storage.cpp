@@ -288,3 +288,17 @@ void wipeAllSettings() {
     activeKeymap = "en";
     credStoreWipe();
 }
+
+void saveCsSecuritySettings() {
+    preferences.begin("kprox", false);
+    preferences.putInt("csAutoLock",  csAutoLockSecs);
+    preferences.putInt("csAutoWipe",  csAutoWipeAttempts);
+    preferences.end();
+}
+
+void loadCsSecuritySettings() {
+    preferences.begin("kprox", false);
+    csAutoLockSecs      = preferences.getInt("csAutoLock", 0);
+    csAutoWipeAttempts  = preferences.getInt("csAutoWipe", 0);
+    preferences.end();
+}

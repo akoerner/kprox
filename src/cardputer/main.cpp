@@ -12,6 +12,8 @@
 #include "../keymap.h"
 #include "../credential_store.h"
 #include "../scheduled_tasks.h"
+#include "../totp.h"
+#include "../storage.h"
 #include "ui_manager.h"
 #include "app_launcher.h"
 #include "app_kprox.h"
@@ -25,6 +27,7 @@
 #include "app_regedit.h"
 #include "app_fuzzyprox.h"
 #include "app_sinkprox.h"
+#include "app_totprox.h"
 #include <M5Cardputer.h>
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -101,6 +104,10 @@ bool bleKeyboardEnabled = true;
 bool bleMouseEnabled    = true;
 
 int maxSinkSize = 0; // 0 = unlimited
+
+int           csAutoLockSecs        = 0;
+int           csAutoWipeAttempts    = 0;
+unsigned long credStoreLastActivity = 0;
 
 String wifiSSID      = DEFAULT_WIFI_SSID;
 String wifiPassword  = DEFAULT_WIFI_PASSWORD;
@@ -212,6 +219,7 @@ void setup() {
     loadUtcOffsetSettings();
     loadSinkSettings();
     loadTimingSettings();
+    loadCsSecuritySettings();
     loadHostnameSettings();
     loadDefaultAppSettings();
     loadMTLSSettings();
@@ -229,6 +237,7 @@ void setup() {
     feedWatchdog();
     keymapInit();
     credStoreInit();
+    totpInit();
     loadScheduledTasks();
 
     // Construct BLE objects here — after settings are loaded — so the device
@@ -405,6 +414,7 @@ void setup() {
     static Cardputer::AppClock       appClock;
     static Cardputer::AppQRProx      appQRProx;
     static Cardputer::AppSchedProx   appSchedProx;
+    static Cardputer::AppTOTProx     appTOTProx;
     static Cardputer::AppSettings    appSettings;
 
     // Registration order determines launcher icon index (0 = launcher, 1..N = user apps)
@@ -419,10 +429,11 @@ void setup() {
     Cardputer::uiManager.addApp(&appClock);    // 8
     Cardputer::uiManager.addApp(&appQRProx);   // 9
     Cardputer::uiManager.addApp(&appSchedProx);// 10
-    Cardputer::uiManager.addApp(&appSettings); // 11
+    Cardputer::uiManager.addApp(&appTOTProx);  // 11
+    Cardputer::uiManager.addApp(&appSettings); // 12
 
-    // Load persisted app order/visibility (11 user apps, indices 1..11)
-    loadAppLayout(11);
+    // Load persisted app order/visibility (12 user apps, indices 1..12)
+    loadAppLayout(12);
 
     int numApps = (int)Cardputer::uiManager.apps().size();
     int startApp = (defaultAppIndex >= 1 && defaultAppIndex < numApps) ? defaultAppIndex : 1;
@@ -473,6 +484,7 @@ void loop() {
     }
 
     if (!pendingTokenStrings.empty()) {
+        credStoreLastActivity = millis();  // any HID output resets CS inactivity timer
         for (int i = (int)pendingTokenStrings.size() - 1; i >= 0; i--) {
             if (!pendingTokenStrings[i].startsWith("SCHED|")) {
                 String tok = pendingTokenStrings[i];

@@ -4,6 +4,9 @@
 #include "keymap.h"
 #include "storage.h"
 #include "credential_store.h"
+#include "totp.h"
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/entropy.h>
 
 #ifdef BOARD_M5STACK_CARDPUTER
 #include <M5Cardputer.h>
@@ -332,16 +335,37 @@ static String evaluateAllTokens(String input, std::map<String, String>& vars) {
             double result = evaluateMathExpression(token.substring(5), vars);
             replacement   = (result == (int)result) ? String((int)result) : String(result, 2);
             resolved      = true;
-        } else if (upperToken.startsWith("RAND ")) {
-            int argStart = 5;
-            String a, b;
-            int space = token.indexOf(' ', argStart);
-            if (space != -1) {
-                a = token.substring(argStart, space);
-                b = token.substring(space + 1);
-                replacement = String(random(a.toInt(), b.toInt() + 1));
-                resolved    = true;
+        } else if (upperToken == "RAND" || upperToken.startsWith("RAND ")) {
+            // Seed a CTR-DRBG from the hardware entropy source (esp_random)
+            mbedtls_ctr_drbg_context ctr;
+            mbedtls_entropy_context   ent;
+            mbedtls_entropy_init(&ent);
+            mbedtls_ctr_drbg_init(&ctr);
+            mbedtls_ctr_drbg_seed(&ctr, mbedtls_entropy_func, &ent, nullptr, 0);
+
+            if (upperToken == "RAND") {
+                // {RAND} with no args — return raw 32-bit unsigned integer
+                uint32_t raw = 0;
+                mbedtls_ctr_drbg_random(&ctr, (uint8_t*)&raw, sizeof(raw));
+                replacement = String(raw);
+            } else {
+                // {RAND min max} — cryptographically random integer in [min, max]
+                int argStart = 5;
+                int space = token.indexOf(' ', argStart);
+                if (space != -1) {
+                    long a = token.substring(argStart, space).toInt();
+                    long b = token.substring(space + 1).toInt();
+                    if (b >= a) {
+                        uint32_t raw = 0;
+                        mbedtls_ctr_drbg_random(&ctr, (uint8_t*)&raw, sizeof(raw));
+                        replacement = String((long)(a + (raw % (uint32_t)(b - a + 1))));
+                    }
+                }
             }
+
+            mbedtls_ctr_drbg_free(&ctr);
+            mbedtls_entropy_free(&ent);
+            resolved = true;
         } else if (upperToken.startsWith("RAW ") || upperToken.startsWith("ASCII ")) {
             int offset = upperToken.startsWith("RAW ") ? 4 : 6;
             String arg = token.substring(offset);
@@ -365,6 +389,15 @@ static String evaluateAllTokens(String input, std::map<String, String>& vars) {
             replacement = WiFi.localIP().toString();
 #endif
             resolved    = true;
+        } else if (upperToken.startsWith("TOTP ")) {
+            String label = token.substring(5);
+            label.trim();
+            int32_t code = totpGetCode(label);
+            if (code >= 0) {
+                char buf[8]; snprintf(buf, sizeof(buf), "%06" PRId32, code);
+                replacement = String(buf);
+            }
+            resolved = true;
         }
 
         if (resolved) {

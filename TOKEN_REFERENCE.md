@@ -281,9 +281,20 @@ Constants: `PI` `E`
 
 ---
 
-## Random Numbers — —
+## Random Numbers — BLE+USB
 
-`{RAND min max}` — integer in [min, max] inclusive.
+All random output uses `mbedtls_ctr_drbg_random` seeded from the hardware entropy source — cryptographically secure pseudo-random numbers.
+
+`{RAND}` — raw unsigned 32-bit integer from the CSPRNG (0–4294967295).
+
+`{RAND min max}` — cryptographically random integer in [min, max] inclusive.
+
+```
+{RAND}
+{RAND 1000 9999}
+{SET pin {RAND 1000 9999}}{pin}
+{LOOP}{MOVEMOUSE {RAND -50 50} {RAND -50 50}}{SLEEP {RAND 1000 3000}}{ENDLOOP}
+```
 
 ---
 
@@ -296,6 +307,33 @@ Constants: `PI` `E`
 ## Credential Store — BLE+USB
 
 `{CREDSTORE label}` — inline-substitute a named credential from the encrypted on-device store. Resolves to empty string when the store is locked.
+
+---
+
+## Device Info — BLE+USB
+
+`{KPROX_IP}` — resolves to the device's current WiFi IP address as a plain string (e.g. `192.168.1.42`). Resolves to an empty string when WiFi is not connected. Useful for typing the web interface URL or embedding the IP in a script.
+
+```
+http://{KPROX_IP}
+{SET ip {KPROX_IP}}{ip}{ENTER}
+```
+
+---
+
+## TOTP — BLE+USB
+
+`{TOTP name}` — resolves to the current 6-digit RFC 6238 TOTP code for the named account stored in TOTProx. Resolves to an empty string if the account does not exist or if NTP time is not yet synced. The `name` is case-insensitive.
+
+Requires WiFi + NTP sync to have occurred before use. The code is computed at the moment the token is evaluated, so it is valid for the remainder of the current 30-second window.
+
+```
+{CREDSTORE username}{TAB}{CREDSTORE password}{TAB}{TOTP github}{ENTER}
+{TOTP work-vpn}
+{SET code {TOTP myaccount}}{code}{ENTER}
+```
+
+Add accounts via the **TOTProx** cardputer app or the web interface (TOTProx tab). Accounts are stored on-device in the `kprox_totp` NVS namespace, separate from the credential store.
 
 ---
 

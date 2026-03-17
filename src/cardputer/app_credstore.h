@@ -3,6 +3,7 @@
 
 #include "app_base.h"
 #include "ui_manager.h"
+#include "../totp.h"
 
 namespace Cardputer {
 
@@ -40,6 +41,8 @@ private:
 
     // Page 0 — status / unlock
     String _keyBuf;
+    String _totpBuf;           // 6-digit TOTP input buffer
+    bool   _totpStep    = false; // true = waiting for TOTP code after PIN
     bool   _unlockFailed   = false;
     bool   _confirmingLock = false;
 
@@ -57,6 +60,17 @@ private:
     bool      _deletePrompted = false;
 
     // Page 2 — change key
+    // Page 2 — change key / gate mode
+    // Sub-modes:
+    //   P2_REKEY     — standard symmetric→symmetric rekey
+    //   P2_GATE_SET  — set gate mode + TOTP secret (entering secret)
+    //   P2_GATE_NEWKEY — enter new symmetric key when leaving TOTP-only
+    enum Page2Mode { P2_REKEY = 0, P2_GATE_SET, P2_GATE_NEWKEY };
+    Page2Mode  _p2Mode     = P2_REKEY;
+    CSGateMode _p2NewGate  = CSGateMode::NONE;
+    String     _p2TotpSec;   // gate TOTP secret being entered
+    String     _p2NewKey;    // new symmetric key (leaving TOTP-only)
+    String     _p2NewKeyConf;
     enum RekeyField { RK_OLD = 0, RK_NEW = 1, RK_CONFIRM = 2 };
     RekeyField _rkField    = RK_OLD;
     String     _rkOld;

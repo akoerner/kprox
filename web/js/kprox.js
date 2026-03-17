@@ -25,6 +25,7 @@ let trackpadPendingDx = 0;
 let trackpadPendingDy = 0;
 let ipAddress = null;
 let deviceHostname = null;
+let csGateMode = 0; // 0=key-only, 1=key+TOTP, 2=TOTP-only
 
 // Mouse movement pipeline -- separate from the main API queue to avoid latency from
 // nonce serialisation competing with keyboard/register requests.
@@ -1756,6 +1757,93 @@ async function sinkDelete() {
     } catch(e) { logDebug('Sink delete error: ' + e.message, 'error'); }
 }
 
+let _csAutoLockInterval = null;
+let _csAutoLockSecs     = 0;
+let _csUnlockedAt       = null;
+
+function _updateCsAutoLockBadge() {
+    const badge   = document.getElementById('csAutoLockBadge');
+    const gBadge  = document.getElementById('globalCsAutoLockBadge');
+    if (_csAutoLockSecs <= 0 || !_csUnlockedAt) {
+        if (badge)  badge.style.display  = 'none';
+        if (gBadge) gBadge.style.display = 'none';
+        return;
+    }
+    const elapsed    = Math.floor((Date.now() - _csUnlockedAt) / 1000);
+    const remaining  = Math.max(0, _csAutoLockSecs - elapsed);
+    const text = `🔒 ${remaining}s`;
+    const bg   = remaining <= 10 ? '#856404' : '#0d4f8c';
+    [badge, gBadge].forEach(el => {
+        if (!el) return;
+        if (remaining === 0) { el.style.display = 'none'; return; }
+        el.style.display    = '';
+        el.textContent      = text;
+        el.style.background = bg;
+    });
+    if (remaining === 0 && _csAutoLockInterval) {
+        clearInterval(_csAutoLockInterval); _csAutoLockInterval = null;
+    }
+}
+
+function _startCsAutoLockCountdown(secs) {
+    _csAutoLockSecs = secs;
+    _csUnlockedAt   = Date.now();
+    if (_csAutoLockInterval) clearInterval(_csAutoLockInterval);
+    if (secs > 0) _csAutoLockInterval = setInterval(_updateCsAutoLockBadge, 1000);
+    _updateCsAutoLockBadge();
+}
+
+function _stopCsAutoLockCountdown() {
+    _csAutoLockSecs = 0; _csUnlockedAt = null;
+    if (_csAutoLockInterval) { clearInterval(_csAutoLockInterval); _csAutoLockInterval = null; }
+    ['csAutoLockBadge', 'globalCsAutoLockBadge'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+    });
+}
+
+function _updateCsFailedBadge(fails, wipeAt) {
+    const text = wipeAt > 0 ? `⚠ ${fails}/${wipeAt} fails` : `⚠ ${fails} fails`;
+    const bg   = fails > 0 ? '#721c24' : '#495057';
+    ['csFailedBadge', 'globalCsFailedBadge'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (fails === 0 && wipeAt === 0) { el.style.display = 'none'; return; }
+        el.style.display    = '';
+        el.textContent      = text;
+        el.style.background = bg;
+    });
+}
+
+async function saveCsSecuritySettings() {
+    if (!isConnected) return;
+    const autoLock = parseInt(document.getElementById('csAutoLockInput')?.value) || 0;
+    const autoWipe = parseInt(document.getElementById('csAutoWipeInput')?.value) || 0;
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/settings`, {
+            method: 'POST',
+            body: JSON.stringify({ cs: { autoLockSecs: autoLock, autoWipeAttempts: autoWipe } })
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        _statusMsg('csSecurityStatus', '✓ Saved', true);
+        await loadSettingsTab();
+    } catch(e) { _statusMsg('csSecurityStatus', '✗ ' + e.message, false); }
+}
+
+async function csResetFails() {
+    if (!isConnected) return;
+    try {
+        await apiFetch(`${getApiEndpoint()}/api/settings`, {
+            method: 'POST',
+            body: JSON.stringify({ cs: { resetFailedAttempts: true } })
+        });
+        const el = document.getElementById('csFailedAttemptsVal');
+        if (el) { el.textContent = '0'; el.style.color = '#28a745'; }
+        _updateCsFailedBadge(0, parseInt(document.getElementById('csAutoWipeInput')?.value) || 0);
+        _statusMsg('csSecurityStatus', '✓ Counter reset', true);
+    } catch(e) { _statusMsg('csSecurityStatus', '✗ ' + e.message, false); }
+}
+
 async function saveSinkMaxSize() {
     if (!isConnected) { logDebug('Not connected', 'warning'); return; }
     const val = parseInt(document.getElementById('sinkMaxSizeInput')?.value) || 0;
@@ -2099,6 +2187,15 @@ async function showTab(tabName) {
     }
     if (tabName === 'credstore' && isConnected) {
         await csRefresh();
+        try {
+            const tr = await apiFetch(`${getApiEndpoint()}/api/totp`, { method: 'GET' });
+            if (tr.ok) {
+                const td = await tr.json();
+                _updateCsNtpBadge(td.time_ready);
+                csGateMode = td.gate_mode ?? 0;
+                _updateCsUnlockForm();
+            }
+        } catch(e) { /* silent */ }
     }
     if (tabName === 'gadgets') {
         const list = document.getElementById('gadgetsList');
@@ -2112,11 +2209,17 @@ async function showTab(tabName) {
     if (tabName === 'reference') {
         await refLoad();
     }
+    if (tabName === 'apiref') {
+        await apirefLoad();
+    }
     if (tabName === 'settings' && isConnected) {
         await loadSettingsTab();
     }
     if (tabName === 'schedtasks' && isConnected) {
         await loadSchedTasks();
+    }
+    if (tabName === 'totprox' && isConnected) {
+        await loadTOTP();
     }
 }
 
@@ -2128,6 +2231,41 @@ function _csStatus(elId, msg, ok) {
     el.textContent = msg;
     el.style.color = ok ? '#28a745' : '#dc3545';
     if (msg) setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 5000);
+}
+
+async function csRefreshStatus() {
+    await csRefresh();
+    if (!isConnected) return;
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/totp`, { method: 'GET' });
+        if (!resp.ok) return;
+        const d = await resp.json();
+        _updateCsNtpBadge(d.time_ready);
+        csGateMode = d.gate_mode ?? 0;
+        _updateCsUnlockForm();
+        totpGateModeChanged();
+    } catch(e) { /* silent */ }
+}
+
+function _updateCsNtpBadge(timeReady) {
+    const updates = [
+        { id: 'csNtpBadge',    prefix: 'NTP: ' },
+        { id: 'globalNtpBadge', prefix: '' },
+    ];
+    updates.forEach(({ id, prefix }) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (timeReady === undefined || timeReady === null) {
+            el.textContent = prefix + 'unknown';
+            el.style.background = '#343a40'; el.style.color = '#adb5bd';
+        } else if (timeReady) {
+            el.textContent = prefix + 'synced';
+            el.style.background = '#198754'; el.style.color = '#fff';
+        } else {
+            el.textContent = prefix + 'not synced';
+            el.style.background = '#856404'; el.style.color = '#fff';
+        }
+    });
 }
 
 async function csRefresh() {
@@ -2148,6 +2286,29 @@ async function csRefresh() {
         if (globBadge) { globBadge.textContent = label; globBadge.style.background = bg; }
         if (count) count.textContent = countTxt;
         if (globCount) globCount.textContent = countTxt;
+
+        const secNote = document.getElementById('csSecurityLockedNote');
+        if (secNote) secNote.style.display = data.locked ? '' : 'none';
+
+        const hint = document.getElementById('csFirstTimeHint');
+        if (hint) hint.style.display = (data.locked && data.has_db === false) ? '' : 'none';
+
+        const keyInput = document.getElementById('csKeyInput');
+        if (keyInput && data.locked) {
+            keyInput.placeholder = data.has_db === false
+                ? 'Choose an encryption key (min 8 chars)'
+                : 'Credential store key';
+        }
+
+        // Auto-lock countdown badge
+        if (!data.locked && data.auto_lock_secs > 0) {
+            _startCsAutoLockCountdown(data.auto_lock_secs);
+        } else {
+            _stopCsAutoLockCountdown();
+        }
+
+        // Failed attempts badge — update both credstore tab and global sidebar
+        _updateCsFailedBadge(data.failed_attempts || 0, data.auto_wipe_at || 0);
         if (list) {
             if (data.locked) {
                 list.innerHTML = '<em style="color:#6c757d;">Unlock the store to view credentials.</em>';
@@ -2179,23 +2340,67 @@ async function csRefresh() {
     }
 }
 
+function _updateCsUnlockForm() {
+    const keyRow  = document.getElementById('csKeyRow');
+    const totpRow = document.getElementById('csTotpRow');
+    const hintEl  = document.getElementById('csGateModeHint');
+    const keyIn   = document.getElementById('csKeyInput');
+    if (!keyRow || !totpRow) return;
+
+    if (csGateMode === 2) {
+        // TOTP only — hide key field, show TOTP
+        keyRow.style.display  = 'none';
+        totpRow.style.display = '';
+        if (keyIn) keyIn.removeAttribute('required');
+        if (hintEl) { hintEl.textContent = 'TOTP-only mode: enter your 6-digit authenticator code.'; hintEl.style.display = ''; }
+    } else if (csGateMode === 1) {
+        // Key + TOTP — show both
+        keyRow.style.display  = '';
+        totpRow.style.display = '';
+        if (keyIn) keyIn.placeholder = 'PIN (min 4 chars)';
+        if (hintEl) { hintEl.textContent = 'PIN + TOTP mode: enter your PIN then your 6-digit code.'; hintEl.style.display = ''; }
+    } else {
+        // Symmetric key only
+        keyRow.style.display  = '';
+        totpRow.style.display = 'none';
+        if (keyIn) keyIn.placeholder = 'Credential store key (min 8 chars)';
+        if (hintEl) hintEl.style.display = 'none';
+    }
+}
+
 async function csUnlock(e) {
     if (e) e.preventDefault();
-    const key = document.getElementById('csKeyInput').value;
-    if (!key) { _csStatus('csLockStatus', 'Enter a key.', false); return; }
-    const endpoint = getApiEndpoint();
+    const key      = csGateMode === 2 ? '' : (document.getElementById('csKeyInput')?.value || '');
+    const totpCode = (csGateMode === 1 || csGateMode === 2)
+        ? (document.getElementById('csTotpInput')?.value.trim() || '')
+        : '';
+
+    const minKeyLen = csGateMode === 1 ? 4 : 8;
+    if (csGateMode !== 2 && key.length < minKeyLen) {
+        _csStatus('csLockStatus', `Key must be at least ${minKeyLen} characters.`, false); return;
+    }
+    if ((csGateMode === 1 || csGateMode === 2) && totpCode.length < 6) {
+        _csStatus('csLockStatus', '6-digit TOTP code required.', false); return;
+    }
+
+    const body = csGateMode === 2
+        ? { action: 'unlock', key: totpCode, totp_code: totpCode }
+        : csGateMode === 1
+            ? { action: 'unlock', key, totp_code: totpCode }
+            : { action: 'unlock', key };
+
     try {
-        const resp = await apiFetch(`${endpoint}/api/credstore`, {
-            method: 'POST',
-            body: JSON.stringify({ action: 'unlock', key })
+        const resp = await apiFetch(`${getApiEndpoint()}/api/credstore`, {
+            method: 'POST', body: JSON.stringify(body)
         });
         const data = await resp.json();
         if (resp.ok && data.locked === false) {
             _csStatus('csLockStatus', 'Unlocked.', true);
-            document.getElementById('csKeyInput').value = '';
+            if (document.getElementById('csKeyInput'))  document.getElementById('csKeyInput').value  = '';
+            if (document.getElementById('csTotpInput')) document.getElementById('csTotpInput').value = '';
             await csRefresh();
         } else {
-            _csStatus('csLockStatus', data.error || 'Invalid key.', false);
+            _csStatus('csLockStatus', data.error || 'Invalid credentials.', false);
         }
     } catch(e) {
         _csStatus('csLockStatus', 'Error: ' + e.message, false);
@@ -2286,13 +2491,13 @@ async function csRekey(e) {
     const oldKey   = document.getElementById('csOldKey').value;
     const newKey   = document.getElementById('csNewKey').value;
     const confirm2 = document.getElementById('csNewKeyConfirm').value;
+    const minLen   = csGateMode === 1 ? 4 : 8;
     if (!oldKey || !newKey) { _csStatus('csRekeyStatus', 'Fill in all fields.', false); return; }
-    if (newKey.length < 8)  { _csStatus('csRekeyStatus', 'New key must be at least 8 characters.', false); return; }
+    if (newKey.length < minLen) { _csStatus('csRekeyStatus', `New key must be at least ${minLen} characters.`, false); return; }
     if (newKey !== confirm2) { _csStatus('csRekeyStatus', 'New keys do not match.', false); return; }
     if (!confirm('This will re-encrypt all credentials with the new key. Continue?')) return;
-    const endpoint = getApiEndpoint();
     try {
-        const resp = await apiFetch(`${endpoint}/api/credstore/rekey`, {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/credstore/rekey`, {
             method: 'POST',
             body: JSON.stringify({ old_key: oldKey, new_key: newKey })
         });
@@ -2824,6 +3029,287 @@ function refSearch() {
 // Legacy alias kept for any remaining onclick="filterTable()" references
 function filterTable() { refSearch(); }
 
+// ---- API Reference ----
+
+let _apirefMd       = null;
+let _apirefSections = [];
+
+async function apirefLoad(force) {
+    const el = document.getElementById('apirefContent');
+    if (!el) return;
+    if (_apirefMd && !force) { _renderApiref(); return; }
+    el.innerHTML = '<p style="color:#6c757d;font-size:13px;">Loading API reference...</p>';
+    try {
+        const endpoint = getApiEndpoint ? getApiEndpoint() : '';
+        const resp = await fetch(endpoint + '/api/apiref');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        _apirefMd = await resp.text();
+        _apirefSections = _mdToSections(_apirefMd);
+        _renderApiref();
+    } catch(e) {
+        el.innerHTML = '<p style="color:#dc3545;font-size:13px;">Could not load API reference: ' + e.message + '. Connect to device first.</p>';
+    }
+}
+
+function _renderApiref(filter) {
+    const el = document.getElementById('apirefContent');
+    if (!el || !_apirefSections.length) return;
+
+    let sections = _apirefSections;
+    if (filter) {
+        const q = filter.toLowerCase();
+        sections = sections.filter(s => s.text.includes(q));
+        if (sections.length === 0) {
+            el.innerHTML = '<p style="color:#6c757d;font-size:13px;">No results for "' + _esc(filter) + '"</p>';
+            return;
+        }
+    }
+
+    const q = filter ? filter.toLowerCase() : null;
+    el.innerHTML = sections.map(s => {
+        if (!q) return s.html;
+        const reEsc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp('(' + reEsc + ')', 'gi');
+        return s.html.replace(/<[^>]*>|[^<]+/g, chunk =>
+            chunk.startsWith('<') ? chunk : chunk.replace(re, '<mark style="background:#fff3cd;">$1</mark>')
+        );
+    }).join('');
+}
+
+function apirefSearch() {
+    const q = (document.getElementById('apirefSearch')?.value || '').trim();
+    if (_apirefSections.length) _renderApiref(q || null);
+}
+
+// ---- TOTProx ----
+
+let _totpRefreshInterval = null;
+
+function _buildOtpAuthUri(secret, label, issuer) {
+    const enc = encodeURIComponent;
+    const fullLabel = issuer ? `${enc(issuer)}:${enc(label)}` : enc(label);
+    return `otpauth://totp/${fullLabel}?secret=${secret}&issuer=${enc(issuer || label)}&digits=6&period=30`;
+}
+
+function _renderQr(containerId, uri) {
+    const el = document.getElementById(containerId);
+    if (!el || typeof QRCode === 'undefined') return;
+    el.innerHTML = '';
+    new QRCode(el, { text: uri, width: 128, height: 128, correctLevel: QRCode.CorrectLevel.M });
+}
+
+function totpGateSecretChanged() {
+    const secret = document.getElementById('totpGateSecret')?.value.trim().toUpperCase().replace(/\s/g,'');
+    const wrapEl = document.getElementById('totpGateQrWrap');
+    const uriEl  = document.getElementById('totpGateUri');
+    if (!wrapEl) return;
+    if (!secret || secret.length < 16) { wrapEl.style.display = 'none'; return; }
+    const hostname = document.getElementById('hostname')?.textContent?.trim() || 'kprox';
+    const uri = _buildOtpAuthUri(secret, 'CS Gate', hostname);
+    if (uriEl) uriEl.textContent = uri;
+    wrapEl.style.display = 'block';
+    _renderQr('totpGateQr', uri);
+}
+
+async function loadTOTP() {
+    if (!isConnected) return;
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/totp`, { method: 'GET' });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const d = await resp.json();
+        _renderTOTP(d);
+    } catch(e) {
+        logDebug('loadTOTP: ' + e.message, 'error');
+    }
+}
+
+function _renderTOTP(d) {
+    const timeEl  = document.getElementById('totpTimeStatus');
+    const gateEl  = document.getElementById('totpGateStatus');
+    const listEl  = document.getElementById('totpAccountList');
+    const modeEl  = document.getElementById('totpGateMode');
+
+    if (timeEl) {
+        timeEl.textContent = d.time_ready
+            ? `Time: synced (epoch ${d.time_epoch})`
+            : 'Time: no NTP sync';
+        timeEl.style.background = d.time_ready ? '#198754' : '#dc3545';
+        timeEl.style.color = '#fff';
+    }
+
+    const gateModes = ['off', 'key + TOTP', 'TOTP only'];
+    if (gateEl) {
+        gateEl.textContent = `Gate: ${gateModes[d.gate_mode] || 'off'}`;
+        gateEl.style.background = d.gate_mode > 0 ? '#6f42c1' : '#343a40';
+        gateEl.style.color = '#fff';
+    }
+    if (modeEl) modeEl.value = String(d.gate_mode ?? 0);
+
+    csGateMode = d.gate_mode ?? 0;
+    _updateCsUnlockForm();
+    totpGateModeChanged();
+
+    const addWarn = document.getElementById('totpAddLockedWarn');
+    if (addWarn) addWarn.style.display = d.cs_locked ? '' : 'none';
+
+    if (!listEl) return;
+    if (!d.accounts || d.accounts.length === 0) {
+        const lockedMsg = d.cs_locked
+            ? '<em style="color:#dc3545;">Unlock the credential store to view TOTP accounts — secrets are encrypted with it.</em>'
+            : '<em>No accounts.</em>';
+        listEl.innerHTML = lockedMsg;
+        return;
+    }
+
+    listEl.innerHTML = d.accounts.map(a => {
+        const code = a.code || '------';
+        const secsLeft = a.seconds_remaining ?? 0;
+        const pct = d.time_ready ? Math.round((secsLeft / (a.period || 30)) * 100) : 0;
+        const barColor = secsLeft <= 5 ? '#dc3545' : '#198754';
+        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;
+                            margin-bottom:6px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:4px;">
+            <div style="flex:1;min-width:0;">
+                <div style="font-weight:600;font-size:13px;">${_esc(a.name)}</div>
+                <div style="font-size:10px;color:#6c757d;">${a.digits}d / ${a.period}s</div>
+                ${d.time_ready ? `
+                <div style="height:3px;background:#dee2e6;border-radius:2px;margin-top:4px;">
+                    <div style="height:3px;width:${pct}%;background:${barColor};border-radius:2px;transition:width 1s linear;"></div>
+                </div>` : ''}
+            </div>
+            <div style="font-family:monospace;font-size:22px;font-weight:700;letter-spacing:3px;
+                        color:${secsLeft <= 5 && d.time_ready ? '#dc3545' : '#212529'};">
+                ${d.time_ready ? code.substring(0,3) + ' ' + code.substring(3) : '--- ---'}
+            </div>
+            ${d.time_ready ? `<div style="font-size:11px;color:#6c757d;min-width:26px;">${secsLeft}s</div>` : ''}
+            <button onclick="totpDeleteAccount('${_esc(a.name)}')"
+                    style="padding:3px 8px;font-size:11px;background:#dc3545;color:#fff;border:none;border-radius:3px;cursor:pointer;">
+                Del
+            </button>
+        </div>`;
+    }).join('');
+}
+
+async function totpAddAccount() {
+    if (!isConnected) return;
+    const name   = document.getElementById('totpNewName')?.value.trim();
+    const secret = document.getElementById('totpNewSecret')?.value.trim().toUpperCase().replace(/\s/g,'');
+    const digits = parseInt(document.getElementById('totpNewDigits')?.value) || 6;
+    const period = parseInt(document.getElementById('totpNewPeriod')?.value) || 30;
+    if (!name || !secret) { _statusMsg('totpAddStatus', '✗ Name and secret required', false); return; }
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/totp`, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'add', name, secret, digits, period })
+        });
+        if (!resp.ok) { const e = await resp.json(); throw new Error(e.error || 'HTTP ' + resp.status); }
+        _statusMsg('totpAddStatus', '✓ Account added', true);
+        document.getElementById('totpNewName').value   = '';
+        document.getElementById('totpNewSecret').value = '';
+        await loadTOTP();
+    } catch(e) { _statusMsg('totpAddStatus', '✗ ' + e.message, false); }
+}
+
+async function totpDeleteAccount(name) {
+    if (!isConnected) return;
+    if (!confirm(`Delete TOTP account "${name}"?`)) return;
+    try {
+        await apiFetch(`${getApiEndpoint()}/api/totp`, {
+            method: 'POST', body: JSON.stringify({ action: 'delete', name })
+        });
+        await loadTOTP();
+    } catch(e) { logDebug('totpDeleteAccount: ' + e.message, 'error'); }
+}
+
+function totpGateModeChanged() {
+    const mode       = parseInt(document.getElementById('totpGateMode')?.value) || 0;
+    const newKeyRow  = document.getElementById('totpNewKeyRow');
+    const newKeyHint = document.getElementById('totpNewKeyHint');
+    if (!newKeyRow) return;
+    // Show new key field only when switching away from TOTP-only (current saved mode is 2)
+    const needsNewKey = (csGateMode === 2) && (mode !== 2);
+    newKeyRow.style.display = needsNewKey ? '' : 'none';
+    if (newKeyHint) newKeyHint.textContent = mode === 1 ? 'min 4 chars (PIN)' : 'min 8 chars';
+}
+
+async function totpSaveGate() {
+    if (!isConnected) return;
+    const mode   = parseInt(document.getElementById('totpGateMode')?.value) || 0;
+    const secret = document.getElementById('totpGateSecret')?.value.trim().toUpperCase().replace(/\s/g,'');
+
+    // Require new_key when leaving TOTP-only mode
+    const needsNewKey = (csGateMode === 2) && (mode !== 2);
+    if (needsNewKey) {
+        const newKey = document.getElementById('totpNewKeyForGate')?.value || '';
+        const minLen = mode === 1 ? 4 : 8;
+        if (newKey.length < minLen) {
+            _statusMsg('totpGateStatus2', `✗ New key must be at least ${minLen} characters`, false); return;
+        }
+        // Require store to be unlocked for rekey
+        const lockBadge = document.getElementById('credStoreLockBadge');
+        if (lockBadge && lockBadge.textContent === 'LOCKED') {
+            _statusMsg('totpGateStatus2', '✗ Unlock the credential store first (use the TOTP code to unlock it, then save gate mode)', false); return;
+        }
+        const body = { action: 'set_gate', gate_mode: mode, new_key: newKey };
+        if (secret) body.gate_secret = secret;
+        try {
+            const resp = await apiFetch(`${getApiEndpoint()}/api/totp`, {
+                method: 'POST', body: JSON.stringify(body)
+            });
+            if (!resp.ok) { const e = await resp.json(); throw new Error(e.error || 'HTTP ' + resp.status); }
+            _statusMsg('totpGateStatus2', '✓ Gate mode saved — store re-encrypted with new key', true);
+            document.getElementById('totpGateSecret').value    = '';
+            document.getElementById('totpNewKeyForGate').value = '';
+            document.getElementById('totpNewKeyRow').style.display = 'none';
+            await loadTOTP();
+        } catch(e) { _statusMsg('totpGateStatus2', '✗ ' + e.message, false); }
+        return;
+    }
+
+    const body = { action: 'set_gate', gate_mode: mode };
+    if (secret) body.gate_secret = secret;
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/totp`, {
+            method: 'POST', body: JSON.stringify(body)
+        });
+        if (!resp.ok) { const e = await resp.json(); throw new Error(e.error || 'HTTP ' + resp.status); }
+        _statusMsg('totpGateStatus2', '✓ Gate mode saved', true);
+        document.getElementById('totpGateSecret').value = '';
+        await loadTOTP();
+    } catch(e) { _statusMsg('totpGateStatus2', '✗ ' + e.message, false); }
+}
+
+async function totpSetCsKey() {
+    if (!isConnected) return;
+    const newKey     = document.getElementById('totpCsNewKey')?.value;
+    const confirmKey = document.getElementById('totpCsConfirmKey')?.value;
+    const minLen     = csGateMode === 1 ? 4 : 8;
+    if (!newKey || newKey.length < minLen) {
+        _statusMsg('totpGateStatus2', `✗ Key must be at least ${minLen} characters`, false); return;
+    }
+    if (newKey !== confirmKey) { _statusMsg('totpGateStatus2', '✗ Keys do not match', false); return; }
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/totp`, {
+            method: 'POST', body: JSON.stringify({ action: 'set_cs_key', new_key: newKey })
+        });
+        if (!resp.ok) { const e = await resp.json(); throw new Error(e.error || 'HTTP ' + resp.status); }
+        const d = await resp.json();
+        _statusMsg('totpGateStatus2', '✓ ' + (d.note || 'Key set'), true);
+        document.getElementById('totpCsNewKey').value     = '';
+        document.getElementById('totpCsConfirmKey').value = '';
+    } catch(e) { _statusMsg('totpGateStatus2', '✗ ' + e.message, false); }
+}
+
+async function totpWipe() {
+    if (!isConnected) return;
+    if (!confirm('Wipe ALL TOTP data (accounts + gate settings)?')) return;
+    try {
+        await apiFetch(`${getApiEndpoint()}/api/totp`, {
+            method: 'POST', body: JSON.stringify({ action: 'wipe' })
+        });
+        await loadTOTP();
+    } catch(e) { logDebug('totpWipe: ' + e.message, 'error'); }
+}
+
 // ---- Scheduled Tasks ----
 
 async function loadSchedTasks() {
@@ -3003,6 +3489,27 @@ async function loadSettingsTab() {
         refreshSinkSize();
         updateSinkCurlExamples();
 
+        // CS Security
+        if (d.cs) {
+            if (d.cs.autoLockSecs !== undefined)    _setVal('csAutoLockInput', d.cs.autoLockSecs);
+            if (d.cs.autoWipeAttempts !== undefined) _setVal('csAutoWipeInput', d.cs.autoWipeAttempts);
+            const failEl = document.getElementById('csFailedAttemptsVal');
+            if (failEl && d.cs.failedAttempts !== undefined) {
+                failEl.textContent = d.cs.failedAttempts;
+                failEl.style.color = d.cs.failedAttempts > 0 ? '#dc3545' : '#28a745';
+            }
+        }
+        // Reflect lock state in security note
+        {
+            const secNote = document.getElementById('csSecurityLockedNote');
+            if (secNote) {
+                // Re-read from credstore badge which reflects current state
+                const lockBadge = document.getElementById('credStoreLockBadge');
+                const isLocked = !lockBadge || lockBadge.textContent === 'LOCKED';
+                secNote.style.display = isLocked ? '' : 'none';
+            }
+        }
+
         // App layout
         if (d.appOrder && d.appHidden) {
             _renderAppLayout(d.appOrder, d.appHidden);
@@ -3014,7 +3521,7 @@ async function loadSettingsTab() {
 
 // ---- App Layout ----
 
-const APP_NAMES = ['KProx','FuzzyProx','RegEdit','CredStore','Gadgets','SinkProx','Keyboard','Clock','QRProx','SchedProx','Settings'];
+const APP_NAMES = ['KProx','FuzzyProx','RegEdit','CredStore','Gadgets','SinkProx','Keyboard','Clock','QRProx','SchedProx','TOTProx','Settings'];
 let _appOrder  = [];
 let _appHidden = [];
 
@@ -4046,6 +4553,10 @@ async function connect() {
             updateWiFiStatus(data.connections.wifi);
         }
 
+        if (data.ntp_synced !== undefined) {
+            _updateCsNtpBadge(data.ntp_synced);
+        }
+
         // Update all connectivity toggles (BT + USB sub-enables + FIDO2)
         if (data.connections) {
             updateConnectivityUI(data);
@@ -4148,6 +4659,11 @@ async function connect() {
         const schedTab = document.getElementById('schedtasks-tab');
         if (schedTab && schedTab.classList.contains('active')) {
             await loadSchedTasks();
+        }
+
+        const totpTab = document.getElementById('totprox-tab');
+        if (totpTab && totpTab.classList.contains('active')) {
+            await loadTOTP();
         }
 
         // Update credstore lock badge (tab + global sidebar)

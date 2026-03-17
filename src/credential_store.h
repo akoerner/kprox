@@ -17,6 +17,8 @@ void   credStoreWipe();
 
 // Returns false if key doesn't match the stored keycheck
 bool   credStoreUnlock(const String& key);
+// Full unlock with optional TOTP second factor / TOTP-only mode
+bool   credStoreUnlockWithTOTP(const String& key, const String& totpCode);
 void   credStoreLock();
 
 // Re-encrypts all values with newKey; oldKey must be current runtime key
@@ -36,3 +38,7 @@ bool   credStoreDelete(const String& label);
 // Low-level symmetric AES-256-CTR+HMAC keyed from an arbitrary key string
 String credEncrypt(const String& plaintext, const String& key);
 String credDecrypt(const String& b64, const String& key);
+
+// Failed-attempt tracking (persisted across reboots in kprox_cs NVS)
+int  csGetFailedAttempts();
+void csResetFailedAttempts();

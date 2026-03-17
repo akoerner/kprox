@@ -10,6 +10,8 @@
 #include "keymap.h"
 #include "credential_store.h"
 #include "scheduled_tasks.h"
+#include "totp.h"
+#include <inttypes.h>
 #ifdef BOARD_M5STACK_CARDPUTER
 #include "cardputer/ui_manager.h"
 #endif
@@ -135,13 +137,21 @@ void handleDocs() {
     server.sendHeader("Cache-Control", "public, max-age=3600");
     if (SPIFFS.exists("/TOKEN_REFERENCE.md")) {
         File f = SPIFFS.open("/TOKEN_REFERENCE.md", "r");
-        if (f) {
-            server.streamFile(f, "text/markdown; charset=utf-8");
-            f.close();
-            return;
-        }
+        if (f) { server.streamFile(f, "text/markdown; charset=utf-8"); f.close(); return; }
     }
     server.send(404, "text/plain", "TOKEN_REFERENCE.md not found on device");
+    server.client().stop();
+}
+
+void handleApiRef() {
+    addCorsHeaders();
+    server.sendHeader("Connection", "close");
+    server.sendHeader("Cache-Control", "public, max-age=3600");
+    if (SPIFFS.exists("/API_REFERENCE.md")) {
+        File f = SPIFFS.open("/API_REFERENCE.md", "r");
+        if (f) { server.streamFile(f, "text/markdown; charset=utf-8"); f.close(); return; }
+    }
+    server.send(404, "text/plain", "API_REFERENCE.md not found on device");
     server.client().stop();
 }
 
@@ -243,6 +253,7 @@ void handleApiStatus() {
     doc["ledEnabled"]          = ledEnabled;
     doc["credStoreLocked"]     = credStoreLocked;
     doc["credStoreCount"]      = credStoreCount();
+    doc["ntp_synced"]          = totpTimeReady();
     doc["sinkSize"]            = sinkSize();
     doc["sinkMaxSize"]         = maxSinkSize;
     doc["ledColor"]["r"]       = ledColorR;
@@ -791,6 +802,12 @@ void handleSettings() {
         doc["device"]["usb_serial"]  = usbSerialNumber;
         doc["defaultApp"]            = defaultAppIndex;
         doc["maxSinkSize"]           = maxSinkSize;
+        doc["cs"]["autoLockSecs"]    = csAutoLockSecs;
+        doc["cs"]["autoWipeAttempts"]= csAutoWipeAttempts;
+        doc["cs"]["failedAttempts"]  = csGetFailedAttempts();
+        doc["csAutoLockSecs"]        = csAutoLockSecs;
+        doc["csAutoWipeAttempts"]    = csAutoWipeAttempts;
+        doc["csFailedAttempts"]      = csGetFailedAttempts();
         // App layout
         JsonArray orderArr  = doc["appOrder"].to<JsonArray>();
         JsonArray hiddenArr = doc["appHidden"].to<JsonArray>();
@@ -905,6 +922,34 @@ void handleSettings() {
         if (doc.containsKey("maxSinkSize")) {
             int ms = doc["maxSinkSize"].as<int>();
             if (ms >= 0) { maxSinkSize = ms; saveSinkSettings(); }
+        }
+
+        if (doc["cs"].is<JsonObject>()) {
+            JsonObject cs = doc["cs"];
+            // resetFailedAttempts also requires store to be unlocked
+            if (!credStoreLocked) {
+                if (cs.containsKey("resetFailedAttempts") && cs["resetFailedAttempts"].as<bool>()) {
+                    csResetFailedAttempts();
+                }
+                bool changed = false;
+                if (cs.containsKey("autoLockSecs"))    { csAutoLockSecs     = max(0, cs["autoLockSecs"].as<int>());     changed = true; }
+                if (cs.containsKey("autoWipeAttempts")) { csAutoWipeAttempts = max(0, cs["autoWipeAttempts"].as<int>()); changed = true; }
+                if (changed) saveCsSecuritySettings();
+            }
+        }
+
+        if (doc.containsKey("csAutoLockSecs")) {
+            int v = doc["csAutoLockSecs"].as<int>();
+            if (v >= 0) { csAutoLockSecs = v; saveCsSecuritySettings(); }
+        }
+
+        if (doc.containsKey("csAutoWipeAttempts")) {
+            int v = doc["csAutoWipeAttempts"].as<int>();
+            if (v >= 0) { csAutoWipeAttempts = v; saveCsSecuritySettings(); }
+        }
+
+        if (doc.containsKey("csResetFailedAttempts") && doc["csResetFailedAttempts"].as<bool>()) {
+            csResetFailedAttempts();
         }
 
         if (doc["appOrder"].is<JsonArray>() && doc["appHidden"].is<JsonArray>()) {
@@ -1083,14 +1128,23 @@ void handleRegistersImport() {
 
 // ---- OTA ----
 
+// Auth state tracked across the multipart upload boundary
+static bool _otaFlashAuthed  = false;
+static bool _otaSpiffsAuthed = false;
+
 void handleOTAUpload() {
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
+        // Auth must have been checked by handleOTAComplete before this fires
+        // on the same connection. If not yet set, abort.
+        if (!_otaFlashAuthed) { Update.abort(); return; }
         if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) Update.printError(Serial);
     } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (!_otaFlashAuthed) return;
         if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) Update.printError(Serial);
         feedWatchdog();
     } else if (upload.status == UPLOAD_FILE_END) {
+        if (!_otaFlashAuthed) return;
         if (!Update.end(true)) Update.printError(Serial);
     }
 }
@@ -1098,7 +1152,8 @@ void handleOTAUpload() {
 void handleOTAComplete() {
     addCorsHeaders();
     server.sendHeader("Connection", "close");
-    if (!checkApiKey()) return;
+    if (!checkApiKey()) { _otaFlashAuthed = false; return; }
+    _otaFlashAuthed = true;
     if (Update.hasError()) {
         JsonDocument doc; doc["error"] = Update.errorString();
         String resp; serializeJson(doc, resp);
@@ -1115,6 +1170,7 @@ void handleOTAComplete() {
 void handleSPIFFSUpload() {
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
+        if (!_otaSpiffsAuthed) { Update.abort(); return; }
         Serial.printf("[SPIFFS OTA] Starting: %s\n", upload.filename.c_str());
         if (SPIFFS.begin(false)) SPIFFS.end();
         size_t fsSize = UPDATE_SIZE_UNKNOWN;
@@ -1125,9 +1181,11 @@ void handleSPIFFSUpload() {
             Serial.printf("[SPIFFS OTA] begin failed: %s\n", Update.errorString());
         }
     } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (!_otaSpiffsAuthed) return;
         if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) Update.printError(Serial);
         feedWatchdog();
     } else if (upload.status == UPLOAD_FILE_END) {
+        if (!_otaSpiffsAuthed) return;
         Serial.printf("[SPIFFS OTA] End, size=%u, success=%d\n", upload.totalSize, Update.end(true));
     }
 }
@@ -1135,7 +1193,8 @@ void handleSPIFFSUpload() {
 void handleSPIFFSComplete() {
     addCorsHeaders();
     server.sendHeader("Connection", "close");
-    if (!checkApiKey()) return;
+    if (!checkApiKey()) { _otaSpiffsAuthed = false; return; }
+    _otaSpiffsAuthed = true;
     if (Update.hasError()) {
         JsonDocument doc; doc["error"] = Update.errorString();
         String resp; serializeJson(doc, resp);
@@ -1422,6 +1481,21 @@ void handleCredStore() {
         JsonDocument doc;
         doc["locked"] = credStoreLocked;
         doc["count"]  = credStoreCount();
+        {
+            preferences.begin("kprox_db", true);
+            bool hasDb = preferences.getInt("cs_db_n", 0) > 0;
+            preferences.end();
+            doc["has_db"] = hasDb;
+        }
+        doc["failed_attempts"]  = csGetFailedAttempts();
+        doc["auto_lock_secs"]   = csAutoLockSecs;
+        doc["auto_wipe_at"]     = csAutoWipeAttempts;
+        if (!credStoreLocked && csAutoLockSecs > 0) {
+            unsigned long elapsed = (millis() - credStoreLastActivity) / 1000UL;
+            doc["lock_in_secs"] = (int)max(0L, (long)csAutoLockSecs - (long)elapsed);
+        } else {
+            doc["lock_in_secs"] = -1;
+        }
         if (!credStoreLocked) {
             JsonArray arr = doc["labels"].to<JsonArray>();
             for (auto& lbl : credStoreListLabels()) arr.add(lbl);
@@ -1437,15 +1511,40 @@ void handleCredStore() {
         String action = doc["action"] | "";
 
         if (action == "unlock") {
-            String key = doc["key"] | "";
-            if (key.isEmpty()) {
-                server.send(400, "application/json", "{\"error\":\"Missing key\"}");
-                server.client().stop(); requestComplete(); return;
-            }
-            if (credStoreUnlock(key)) {
-                sendEncrypted(200, "{\"status\":\"ok\",\"locked\":false}");
+            CSGateMode gate  = csGateGetMode();
+            String key       = doc["key"]       | "";
+            String totpCode  = doc["totp_code"] | "";
+
+            // TOTP-only: key field is the totp code itself (backward compat)
+            if (gate == CSGateMode::TOTP_ONLY) {
+                // accept code from either field
+                if (totpCode.isEmpty()) totpCode = key;
+                if (totpCode.length() < 6) {
+                    sendEncrypted(400, "{\"error\":\"6-digit TOTP code required\"}");
+                    server.client().stop(); requestComplete(); return;
+                }
+                if (credStoreUnlockWithTOTP("", totpCode)) {
+                    sendEncrypted(200, "{\"status\":\"ok\",\"locked\":false}");
+                } else {
+                    sendEncrypted(401, "{\"error\":\"Invalid TOTP code\"}");
+                }
             } else {
-                sendEncrypted(401, "{\"error\":\"Invalid key\"}");
+                int minKeyLen = (gate == CSGateMode::TOTP) ? 4 : 8;
+                if ((int)key.length() < minKeyLen) {
+                    char buf[64];
+                    snprintf(buf, sizeof(buf), "{\"error\":\"Key must be at least %d characters\"}", minKeyLen);
+                    server.send(400, "application/json", buf);
+                    server.client().stop(); requestComplete(); return;
+                }
+                if (gate == CSGateMode::TOTP && totpCode.length() < 6) {
+                    sendEncrypted(400, "{\"error\":\"6-digit TOTP code required\"}");
+                    server.client().stop(); requestComplete(); return;
+                }
+                if (credStoreUnlockWithTOTP(key, totpCode)) {
+                    sendEncrypted(200, "{\"status\":\"ok\",\"locked\":false}");
+                } else {
+                    sendEncrypted(401, "{\"error\":\"Invalid credentials\"}");
+                }
             }
 
         } else if (action == "lock") {
@@ -1523,8 +1622,11 @@ void handleCredStoreKey() {
         server.client().stop(); requestComplete(); return;
     }
 
-    if (newKey.length() < 8) {
-        server.send(400, "application/json", "{\"error\":\"new_key must be at least 8 characters\"}");
+    int minKeyLen = (csGateGetMode() == CSGateMode::TOTP) ? 4 : 8;
+    if ((int)newKey.length() < minKeyLen) {
+        char buf[80];
+        snprintf(buf, sizeof(buf), "{\"error\":\"new_key must be at least %d characters\"}", minKeyLen);
+        server.send(400, "application/json", buf);
         server.client().stop(); requestComplete(); return;
     }
 
@@ -1629,6 +1731,174 @@ void handleSchedTasks() {
     server.client().stop();
 }
 
+// ---- TOTP ----
+
+void handleTOTP() {
+    addCorsHeaders();
+    server.sendHeader("Connection", "close");
+
+    if (server.method() == HTTP_OPTIONS) {
+        server.send(200, "text/plain", "");
+        server.client().stop();
+        return;
+    }
+
+    if (!checkApiKey()) return;
+
+    if (server.method() == HTTP_GET) {
+        // List accounts + gate config + current codes
+        JsonDocument doc;
+        doc["gate_mode"]   = (int)csGateGetMode();
+        doc["time_ready"]  = totpTimeReady();
+        doc["time_epoch"]  = (long)time(nullptr);
+        doc["cs_locked"]   = credStoreLocked;
+
+        JsonArray arr = doc["accounts"].to<JsonArray>();
+        for (auto& a : totpListAccounts()) {
+            JsonObject obj = arr.add<JsonObject>();
+            obj["name"]   = a.name;
+            obj["digits"] = a.digits;
+            obj["period"] = a.period;
+            if (totpTimeReady()) {
+                char buf[8];
+                snprintf(buf, sizeof(buf), "%06" PRId32,
+                         (int32_t)totpCompute(a.secret, time(nullptr), a.period, a.digits));
+                obj["code"] = buf;
+                obj["seconds_remaining"] = totpSecondsRemaining(time(nullptr), a.period);
+            }
+        }
+        String resp; serializeJson(doc, resp);
+        sendEncrypted(200, resp);
+        server.client().stop(); requestComplete(); return;
+    }
+
+    if (server.method() == HTTP_POST) {
+        if (!canProceed()) return;
+        JsonDocument doc;
+        if (!parseJsonBody(doc)) { requestComplete(); return; }
+
+        String action = doc["action"] | "";
+
+        if (action == "add") {
+            if (credStoreLocked) {
+                sendEncrypted(403, "{\"error\":\"Unlock the credential store first — TOTP secrets are encrypted with it\"}");
+                server.client().stop(); requestComplete(); return;
+            }
+            TOTPAccount a;
+            a.name   = doc["name"]   | "";
+            a.secret = doc["secret"] | "";
+            a.digits = doc["digits"] | 6;
+            a.period = doc["period"] | 30;
+            if (a.name.isEmpty() || a.secret.isEmpty()) {
+                server.send(400, "application/json", "{\"error\":\"name and secret required\"}");
+                server.client().stop(); requestComplete(); return;
+            }
+            if (totpAddAccount(a)) {
+                sendEncrypted(200, "{\"status\":\"ok\"}");
+            } else {
+                sendEncrypted(400, "{\"error\":\"Invalid secret (Base32, min 16 chars)\"}");
+            }
+
+        } else if (action == "delete") {
+            String name = doc["name"] | "";
+            totpDeleteAccount(name);
+            sendEncrypted(200, "{\"status\":\"ok\"}");
+
+        } else if (action == "set_gate") {
+            int mode = doc["gate_mode"] | 0;
+            if (mode < 0 || mode > 2) {
+                server.send(400, "application/json", "{\"error\":\"gate_mode must be 0,1,2\"}");
+                server.client().stop(); requestComplete(); return;
+            }
+            if (mode > 0) {
+                String secret = doc["gate_secret"] | "";
+                if (!secret.isEmpty()) csGateSetSecret(secret);
+                if (csGateGetSecret().isEmpty()) {
+                    server.send(400, "application/json", "{\"error\":\"gate_secret required\"}");
+                    server.client().stop(); requestComplete(); return;
+                }
+            }
+
+            CSGateMode prevMode = csGateGetMode();
+            String gateSecret   = csGateGetSecret();
+            bool switchingToTotpOnly   = (mode == (int)CSGateMode::TOTP_ONLY) && (prevMode != CSGateMode::TOTP_ONLY);
+            bool switchingFromTotpOnly = (prevMode == CSGateMode::TOTP_ONLY) && (mode != (int)CSGateMode::TOTP_ONLY);
+
+            if (switchingToTotpOnly) {
+                // Must rekey all credentials from current symmetric key to the gate secret.
+                // Store must be unlocked to do this.
+                if (credStoreLocked || credStoreRuntimeKey.isEmpty()) {
+                    server.send(409, "application/json",
+                        "{\"error\":\"Unlock the credential store before switching to TOTP-only mode\"}");
+                    server.client().stop(); requestComplete(); return;
+                }
+                if (!gateSecret.isEmpty() && !credStoreRekey(credStoreRuntimeKey, gateSecret)) {
+                    server.send(500, "application/json", "{\"error\":\"Failed to rekey credentials\"}");
+                    server.client().stop(); requestComplete(); return;
+                }
+            } else if (switchingFromTotpOnly) {
+                String newKey = doc["new_key"] | "";
+                // Target mode is key-only or key+TOTP
+                int minKeyLen = (mode == (int)CSGateMode::TOTP) ? 4 : 8;
+                if ((int)newKey.length() < minKeyLen) {
+                    char errBuf[80];
+                    snprintf(errBuf, sizeof(errBuf),
+                        "{\"error\":\"new_key (min %d chars) required when leaving TOTP-only mode\"}", minKeyLen);
+                    server.send(400, "application/json", errBuf);
+                    server.client().stop(); requestComplete(); return;
+                }
+                if (credStoreLocked || credStoreRuntimeKey.isEmpty()) {
+                    server.send(409, "application/json",
+                        "{\"error\":\"Unlock the credential store before changing gate mode\"}");
+                    server.client().stop(); requestComplete(); return;
+                }
+                if (!credStoreRekey(credStoreRuntimeKey, newKey)) {
+                    server.send(500, "application/json", "{\"error\":\"Failed to rekey credentials\"}");
+                    server.client().stop(); requestComplete(); return;
+                }
+            }
+
+            csGateSetMode((CSGateMode)mode);
+            sendEncrypted(200, "{\"status\":\"ok\"}");
+
+        } else if (action == "set_cs_key") {
+            String newKey = doc["new_key"] | "";
+            int minKeyLen = (csGateGetMode() == CSGateMode::TOTP) ? 4 : 8;
+            if ((int)newKey.length() < minKeyLen) {
+                char errBuf[80];
+                snprintf(errBuf, sizeof(errBuf), "{\"error\":\"new_key must be at least %d characters\"}", minKeyLen);
+                server.send(400, "application/json", errBuf);
+                server.client().stop(); requestComplete(); return;
+            }
+            if (!credStoreLocked && !credStoreRuntimeKey.isEmpty()) {
+                if (credStoreRekey(credStoreRuntimeKey, newKey)) {
+                    sendEncrypted(200, "{\"status\":\"ok\",\"note\":\"credentials rekeyed\"}");
+                } else {
+                    sendEncrypted(500, "{\"error\":\"Rekey failed\"}");
+                }
+            } else {
+                // Store locked — clear keycheck; new key will be the initialisation key
+                preferences.begin("kprox_cs", false);
+                preferences.putString("cs_kc", "");
+                preferences.end();
+                sendEncrypted(200, "{\"status\":\"ok\",\"note\":\"keycheck cleared — new key takes effect on next unlock\"}");
+            }
+
+        } else if (action == "wipe") {
+            totpWipe();
+            sendEncrypted(200, "{\"status\":\"ok\"}");
+
+        } else {
+            server.send(400, "application/json", "{\"error\":\"Unknown action\"}");
+        }
+        server.client().stop();
+        requestComplete(); return;
+    }
+
+    server.send(405, "application/json", "{\"error\":\"Method not allowed\"}");
+    server.client().stop();
+}
+
 // ---- Route setup ----
 
 void setupRoutes() {
@@ -1643,6 +1913,7 @@ void setupRoutes() {
     });
 
     server.on("/api/docs",               HTTP_GET,     handleDocs);
+    server.on("/api/apiref",             HTTP_GET,     handleApiRef);
     server.on("/api/nonce",              HTTP_GET,     handleNonce);
     server.on("/api/status",             HTTP_GET,     handleApiStatus);
     server.on("/api/settings",           HTTP_GET,     handleSettings);
@@ -1680,6 +1951,7 @@ void setupRoutes() {
     server.on("/api/credstore",          HTTP_GET,     handleCredStore);
     server.on("/api/credstore",          HTTP_POST,    handleCredStore);
     server.on("/api/credstore/rekey",    HTTP_POST,    handleCredStoreKey);
+    server.on("/api/totp",               HTTP_ANY,     handleTOTP);
     server.on("/api/schedtasks",         HTTP_GET,     handleSchedTasks);
     server.on("/api/schedtasks",         HTTP_POST,    handleSchedTasks);
     server.on("/api/schedtasks",         HTTP_DELETE,  handleSchedTasks);
@@ -1698,8 +1970,9 @@ void setupRoutes() {
         "/api/discovery", "/api/network", "/api/registers/export",
         "/api/registers/import", "/api/ota", "/api/ota/spiffs",
         "/api/mtls", "/api/mtls/certs",
-        "/api/nonce", "/api/keymap",
+        "/api/nonce", "/api/keymap", "/api/docs", "/api/apiref",
         "/api/credstore", "/api/credstore/rekey",
+        "/api/totp",
         "/api/schedtasks"
     };
     for (const char* path : opts) server.on(path, HTTP_OPTIONS, handleOptions);
