@@ -18,3 +18,11 @@ int defaultAppIndex = 1;
 // ---- App display order and visibility ----
 std::vector<int>  appOrder;
 std::vector<bool> appHidden;
+
+// ---- Credential store security settings ----
+int           csAutoLockSecs        = 0;
+int           csAutoWipeAttempts    = 0;
+unsigned long credStoreLastActivity = 0;
+
+// ---- Sink ----
+int maxSinkSize = 0; // 0 = unlimited

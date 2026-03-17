@@ -103,11 +103,7 @@ bool fido2Enabled       = false;
 bool bleKeyboardEnabled = true;
 bool bleMouseEnabled    = true;
 
-int maxSinkSize = 0; // 0 = unlimited
-
-int           csAutoLockSecs        = 0;
-int           csAutoWipeAttempts    = 0;
-unsigned long credStoreLastActivity = 0;
+// maxSinkSize defined in globals.cpp
 
 String wifiSSID      = DEFAULT_WIFI_SSID;
 String wifiPassword  = DEFAULT_WIFI_PASSWORD;
