@@ -170,6 +170,7 @@ Use arrow keys to navigate the launcher, ENTER to open an app, and backtick or `
 | **Gadgets** | Browse and install community gadgets from GitHub |
 | **Keymap Editor** | Upload and manage custom keyboard layout JSON files |
 | **File Browser** | SD card file manager: browse, create, edit, save, delete, run `.kps` scripts |
+| **BootProx** | Configure and monitor the boot register: enable/disable, select register, set fire limit, reset count |
 | **KPScript Editor** | Write, save, and run KProx Script files stored on the SD card |
 | **KPS Reference** | KProx Script language reference (loaded from device). See also [KEYPROX_SCRIPT_REFERENCE.md](KEYPROX_SCRIPT_REFERENCE.md). |
 
@@ -256,7 +257,7 @@ All endpoints require `X-Auth: hmac-sha256(apiKey, nonce)`. See [API_REFERENCE.m
 |----------|---------|-------------|
 | `/api/nonce` | GET | Single-use nonce for HMAC |
 | `/api/status` | GET | Device status and lock state |
-| `/api/settings` | GET POST | All settings including dynamic app list |
+| `/api/settings` | GET POST | All settings including dynamic app list and boot register config |
 | `/api/registers` | GET POST DELETE | Register management |
 | `/api/credstore` | GET POST | Credential store operations |
 | `/api/credstore/rekey` | POST | Re-encrypt with new key |

@@ -328,11 +328,71 @@ All random output uses `mbedtls_ctr_drbg_random` seeded from the hardware entrop
 
 ## Device Info — BLE+USB
 
-`{KPROX_IP}` — resolves to the device's current WiFi IP address as a plain string (e.g. `192.168.1.42`). Resolves to an empty string when WiFi is not connected. Useful for typing the web interface URL or embedding the IP in a script.
+| Token | Description |
+|-------|-------------|
+| `{KPROX_IP}` | Current WiFi IP address; empty string when not connected |
+| `{WIFI_SSID}` | Connected network name; empty string when not connected |
+| `{WIFI_RSSI}` | WiFi signal strength in dBm; empty string when not connected |
+| `{FREE_HEAP}` | Free heap memory in bytes |
+| `{UPTIME}` | Seconds since last boot |
+| `{BATTERY}` | Battery level 0-100 (Cardputer only) |
 
 ```
 http://{KPROX_IP}
-{SET ip {KPROX_IP}}{ip}{ENTER}
+SSID: {WIFI_SSID}  RSSI: {WIFI_RSSI} dBm
+Heap: {FREE_HEAP} bytes  Uptime: {UPTIME}s
+Battery: {BATTERY}%
+```
+
+---
+
+## Sink — BLE+USB
+
+| Token | Description |
+|-------|-------------|
+| `{SINK}` | Resolves to the current content of the sink buffer (read without flushing) |
+| `{SINK_SIZE}` | Resolves to the current sink buffer size in bytes as a plain integer |
+
+```
+{SET captured {SINK}}
+Buffer has {SINK_SIZE} bytes
+```
+
+---
+
+## Time and Date — BLE+USB
+
+| Token | Description |
+|-------|-------------|
+| `{TIMESTAMP}` | Unix epoch as a plain integer string |
+| `{TIME}` | Current time typed as `HH:MM:SS` |
+| `{DATE}` | Current date as `YYYY-MM-DD` |
+| `{DATE +format}` | Current date/time formatted with `strftime` directives |
+
+`{DATE}` and `{DATE +format}` use the same format directives as the Linux `date` command.
+
+```
+{TIMESTAMP}
+{TIME}
+{DATE}
+{DATE +"%Y-%m-%dT%H:%M:%SZ"}
+{DATE +"%d/%m/%Y"}
+{DATE +"%H:%M"}
+{SET ts {DATE +"%Y%m%d_%H%M%S"}}log_{ts}.txt
+```
+
+Common directives: `%Y` year · `%m` month · `%d` day · `%H` hour · `%M` minute · `%S` second · `%s` Unix epoch · `%A` weekday name · `%B` month name.
+
+Requires NTP sync. If time is not yet synced the output reflects the Unix epoch origin (1970-01-01T00:00:00Z).
+
+---
+
+## Network — —
+
+`{WAIT_WIFI}` — blocks execution until WiFi is connected or the user aborts (ESC / BtnA). Useful at the top of scripts that require network access.
+
+```
+{WAIT_WIFI}{TOTP mysite}{ENTER}
 ```
 
 ---

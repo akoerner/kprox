@@ -99,15 +99,15 @@ See [KEYPROX_SCRIPT_REFERENCE.md](KEYPROX_SCRIPT_REFERENCE.md) for the full lang
 
 Arrow keys navigate the launcher. ENTER opens an app. BtnG0 always plays the active register.
 
-| App          | What it does                                                      |
-|--------------|-------------------------------------------------------------------|
-| **KProx**    | Status, active register playback                                  |
+| App         | What it does                                                       |
+|-------------|--------------------------------------------------------------------|
+| **KProx**   | Status, active register playback                                   |
 | **CredStore**| Unlock and manage credentials                                     |
-| **TOTProx**  | View live TOTP codes, type them with BtnG0                        |
-| **QRProx**   | Displays a QR code and URL for the web interface                  |
-| **Files**    | Browse SD card, view files, dump to HID with `D`                  |
-| **KPScript** | Select and run `.kps` scripts from the SD card                    |
-| **Settings** | WiFi, Bluetooth, USB, app layout, security                        |
+| **TOTProx** | View live TOTP codes, type them with BtnG0                         |
+| **QRProx**  | Displays a QR code and URL for the web interface                   |
+| **Files**   | Browse SD card, view files, dump to HID with `D`                   |
+| **KPScript**| Select and run `.kps` scripts from the SD card                     |
+| **Settings**| WiFi, Bluetooth, USB, app layout, security                         |
 
 ---
 

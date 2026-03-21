@@ -178,6 +178,12 @@ extern int        currentMouseY;
 // ---- Sink ----
 extern int maxSinkSize; // 0 = unlimited
 
+// ---- Boot register ----
+extern bool   bootRegEnabled;
+extern int    bootRegIndex;    // 0-based register index
+extern int    bootRegLimit;    // 0 = every boot; N = fire N times then disable
+extern int    bootRegFiredCount; // how many times it has fired
+
 // Credential store security settings
 extern int           csAutoLockSecs;       // 0 = disabled
 extern int           csAutoWipeAttempts;   // 0 = disabled

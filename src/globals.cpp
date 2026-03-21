@@ -28,3 +28,9 @@ String csStorageLocation = "nvs";
 
 // ---- Sink ----
 int maxSinkSize = 0; // 0 = unlimited
+
+// ---- Boot register ----
+bool   bootRegEnabled    = false;
+int    bootRegIndex      = 0;
+int    bootRegLimit      = 0;
+int    bootRegFiredCount = 0;

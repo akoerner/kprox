@@ -302,6 +302,11 @@ void handleApiStatus() {
     doc["boardType"] = "M5Stack ATOM Lite";
 #endif
 
+    doc["bootReg"]["enabled"]    = bootRegEnabled;
+    doc["bootReg"]["index"]      = bootRegIndex;
+    doc["bootReg"]["limit"]      = bootRegLimit;
+    doc["bootReg"]["firedCount"] = bootRegFiredCount;
+
     String response;
     serializeJson(doc, response);
     sendEncrypted(200, response);
@@ -822,6 +827,10 @@ void handleSettings() {
         doc["device"]["usb_serial"]  = usbSerialNumber;
         doc["defaultApp"]            = defaultAppIndex;
         doc["maxSinkSize"]           = maxSinkSize;
+        doc["bootReg"]["enabled"]    = bootRegEnabled;
+        doc["bootReg"]["index"]      = bootRegIndex;
+        doc["bootReg"]["limit"]      = bootRegLimit;
+        doc["bootReg"]["firedCount"] = bootRegFiredCount;
         doc["cs"]["autoLockSecs"]    = csAutoLockSecs;
         doc["cs"]["autoWipeAttempts"]= csAutoWipeAttempts;
         doc["cs"]["failedAttempts"]  = csGetFailedAttempts();
@@ -862,6 +871,16 @@ void handleSettings() {
         if (!canProceed()) return;
         JsonDocument doc;
         if (!parseJsonBody(doc)) { requestComplete(); return; }
+
+        if (doc["bootReg"].is<JsonObject>()) {
+            JsonObject br = doc["bootReg"];
+            bool changed = false;
+            if (br.containsKey("enabled"))    { bootRegEnabled    = br["enabled"].as<bool>();  changed = true; }
+            if (br.containsKey("index"))      { bootRegIndex      = max(0, br["index"].as<int>()); changed = true; }
+            if (br.containsKey("limit"))      { bootRegLimit      = max(0, br["limit"].as<int>()); changed = true; }
+            if (br.containsKey("firedCount")) { bootRegFiredCount = max(0, br["firedCount"].as<int>()); changed = true; }
+            if (changed) saveBootRegSettings();
+        }
 
         if (doc.containsKey("utcOffset")) {
             utcOffsetSeconds = doc["utcOffset"].as<long>();

@@ -211,6 +211,7 @@ void setup() {
     loadLEDSettings();
     loadCsSecuritySettings();
     loadCsStorageLocation();
+    loadBootRegSettings();
     loadHostnameSettings();
     loadMTLSSettings();
     loadKeymapSettings();
@@ -295,6 +296,21 @@ void setup() {
     if (ledEnabled && !registers.empty()) {
         delay(1000);
         blinkLED(activeRegister + 1, LED_COLOR_REG_CHANGE);
+    }
+
+    // Fire boot register if enabled and within limit
+    if (bootRegEnabled && !registers.empty() &&
+        bootRegIndex >= 0 && bootRegIndex < (int)registers.size()) {
+        bool shouldFire = (bootRegLimit == 0) || (bootRegFiredCount < bootRegLimit);
+        if (shouldFire) {
+            bootRegFiredCount++;
+            if (bootRegLimit > 0 && bootRegFiredCount >= bootRegLimit) {
+                bootRegEnabled = false;
+            }
+            saveBootRegSettings();
+            delay(500);
+            playRegister(bootRegIndex);
+        }
     }
 
     feedWatchdog();

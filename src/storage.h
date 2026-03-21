@@ -48,4 +48,7 @@ void saveCsStorageLocation();
 void loadCsStorageLocation();
 void loadAppLayout(int numApps);
 
+void saveBootRegSettings();
+void loadBootRegSettings();
+
 void wipeAllSettings();

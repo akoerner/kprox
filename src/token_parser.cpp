@@ -422,13 +422,66 @@ String evaluateAllTokens(const String& text, std::map<String, String>& vars) {
             replacement = sdReadFile(path);
             resolved    = true;
         } else if (upperToken.startsWith("EXEC ")) {
-            // Execute a named/indexed register with the current variable scope
             String arg = evaluateAllTokens(token.substring(5), vars);
             arg.trim();
             int idx = resolveRegisterArg(arg);
             if (idx >= 0 && !registers[idx].isEmpty())
                 parseAndSendText(registers[idx], vars);
             resolved = true;
+
+        // ---- Sink ----
+        } else if (upperToken == "SINK") {
+            if (SPIFFS.exists("/sink.txt")) {
+                File f = SPIFFS.open("/sink.txt", "r");
+                if (f) { replacement = f.readString(); f.close(); }
+            }
+            resolved = true;
+        } else if (upperToken == "SINK_SIZE") {
+            size_t sz = 0;
+            if (SPIFFS.exists("/sink.txt")) {
+                File f = SPIFFS.open("/sink.txt", "r");
+                if (f) { sz = f.size(); f.close(); }
+            }
+            replacement = String(sz);
+            resolved = true;
+
+        // ---- Time / date ----
+        } else if (upperToken == "TIMESTAMP") {
+            replacement = String((long)time(nullptr));
+            resolved = true;
+        } else if (upperToken.startsWith("DATE")) {
+            String fmt = token.length() > 4 ? token.substring(4) : String("");
+            fmt.trim();
+            // Strip optional leading + and quotes
+            if (!fmt.isEmpty() && fmt[0] == '+') fmt = fmt.substring(1);
+            if (fmt.length() >= 2 && fmt[0] == '"' && fmt[fmt.length()-1] == '"')
+                fmt = fmt.substring(1, fmt.length()-1);
+            if (fmt.isEmpty()) fmt = "%Y-%m-%d";
+            time_t now = time(nullptr);
+            struct tm* t = localtime(&now);
+            char buf[64];
+            strftime(buf, sizeof(buf), fmt.c_str(), t);
+            replacement = String(buf);
+            resolved = true;
+
+        // ---- Device diagnostics ----
+        } else if (upperToken == "FREE_HEAP") {
+            replacement = String(ESP.getFreeHeap());
+            resolved = true;
+        } else if (upperToken == "UPTIME") {
+            replacement = String(millis() / 1000UL);
+            resolved = true;
+        } else if (upperToken == "WIFI_RSSI") {
+            replacement = (WiFi.status() == WL_CONNECTED) ? String(WiFi.RSSI()) : String("");
+            resolved = true;
+        } else if (upperToken == "WIFI_SSID") {
+            replacement = (WiFi.status() == WL_CONNECTED) ? WiFi.SSID() : String("");
+            resolved = true;
+#ifdef BOARD_M5STACK_CARDPUTER
+        } else if (upperToken == "BATTERY") {
+            replacement = String((int)constrain(M5Cardputer.Power.getBatteryLevel(), 0, 100));
+            resolved = true;
+#endif
         }
 
         if (resolved) {
@@ -522,6 +575,7 @@ static bool isControlToken(const String& token) {
             u == "ENDLOOP"  || u == "ENDFOR"  || u == "ENDWHILE"  ||
             u == "ELSE"     || u == "ENDIF"   || u == "BREAK"     ||
             u.startsWith("SLEEP ")      || u.startsWith("CHORD ")       || u.startsWith("HID ")        ||
+            u == "WAIT_WIFI"            || u == "TIME"                  ||
             u.startsWith("WIFI ")       || u.startsWith("SETMOUSE ")    || u.startsWith("MOVEMOUSE ")  ||
             u.startsWith("MOUSECLICK")  || u.startsWith("MOUSEPRESS")   ||
             u.startsWith("MOUSERELEASE")|| u.startsWith("MOUSEDOUBLECLICK") ||
@@ -766,6 +820,22 @@ void parseAndSendText(const String& text, std::map<String, String>& vars) {
         }
         else if (u == "HALT")   { haltAllOperations(); return; }
         else if (u == "RESUME") { resumeOperations(); }
+        else if (u == "WAIT_WIFI") {
+            // Block until WiFi connects or execution is aborted
+            while (WiFi.status() != WL_CONNECTED && !g_parserAbort) {
+                server.handleClient();
+                delay(200);
+                checkParseInterrupt();
+            }
+        }
+        else if (u == "TIME") {
+            // {TIME} types the current time as HH:MM:SS via HID
+            time_t now = time(nullptr);
+            struct tm* t = localtime(&now);
+            char buf[10];
+            strftime(buf, sizeof(buf), "%H:%M:%S", t);
+            sendPlainText(String(buf));
+        }
         else if (u.startsWith("SLEEP ")) {
             int sleepTime = evaluateAllTokens(token.substring(6), vars).toInt();
             unsigned long start = millis();

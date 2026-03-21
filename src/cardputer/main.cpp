@@ -30,6 +30,7 @@
 #include "app_totprox.h"
 #include "app_filebrowser.h"
 #include "app_kpsrunner.h"
+#include "app_bootprox.h"
 #include <M5Cardputer.h>
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -220,6 +221,7 @@ void setup() {
     loadLEDSettings();
     loadCsSecuritySettings();
     loadCsStorageLocation();
+    loadBootRegSettings();
     loadHostnameSettings();
     loadDefaultAppSettings();
     loadMTLSSettings();
@@ -231,7 +233,7 @@ void setup() {
         for (int i = 0; i < 3; i++) { setLED(LED_COLOR_BOOT, 200); delay(200); feedWatchdog(); }
     }
 
-    showSplash();
+    if (!bootRegEnabled) showSplash();
 
     if (!SPIFFS.begin(true)) { /* SPIFFS mount failed */ }
     feedWatchdog();
@@ -265,6 +267,59 @@ void setup() {
     if (bluetoothEnabled) BLE_KEYBOARD.releaseAll();
     if (usbEnabled && usbInitialized) { if (usbKeyboardReady) USBKeyboard.releaseAll(); if (KProxConsumer.isReady()) { KProxConsumer.sendConsumer(0,0); KProxConsumer.sendSystem(0); } }
     feedWatchdog();
+
+    // Fire boot register — HID ready, splash already shown
+    if (bootRegEnabled && !registers.empty() &&
+        bootRegIndex >= 0 && bootRegIndex < (int)registers.size()) {
+        bool shouldFire = (bootRegLimit == 0) || (bootRegFiredCount < bootRegLimit);
+        if (shouldFire) {
+            bootRegFiredCount++;
+            if (bootRegLimit > 0 && bootRegFiredCount >= bootRegLimit)
+                bootRegEnabled = false;
+            saveBootRegSettings();
+
+            // Draw boot summary screen
+            {
+                auto& disp = M5Cardputer.Display;
+                disp.fillScreen(TFT_BLACK);
+
+                uint16_t hdrBg = disp.color565(0, 60, 120);
+                disp.fillRect(0, 0, disp.width(), 16, hdrBg);
+                disp.setTextDatum(TL_DATUM);
+                disp.setTextSize(1);
+                disp.setTextColor(TFT_WHITE, hdrBg);
+                disp.drawString("BootProx", 4, 3);
+
+                String cntStr = bootRegLimit > 0
+                    ? String(bootRegFiredCount) + "/" + String(bootRegLimit)
+                    : "Fire " + String(bootRegFiredCount);
+                int cw = disp.textWidth(cntStr);
+                disp.setTextColor(disp.color565(180, 255, 180), hdrBg);
+                disp.drawString(cntStr, disp.width() - cw - 4, 3);
+
+                int y = 22;
+                disp.setTextColor(disp.color565(100, 160, 220), TFT_BLACK);
+                String regLabel = "Reg " + String(bootRegIndex + 1);
+                if (bootRegIndex < (int)registerNames.size() && !registerNames[bootRegIndex].isEmpty())
+                    regLabel += "  " + registerNames[bootRegIndex];
+                if ((int)regLabel.length() > 26) regLabel = regLabel.substring(0, 24) + "..";
+                disp.drawString(regLabel, 4, y); y += 14;
+
+                disp.setTextColor(disp.color565(160, 160, 160), TFT_BLACK);
+                String preview = registers[bootRegIndex];
+                if ((int)preview.length() > 34) preview = preview.substring(0, 31) + "...";
+                disp.drawString(preview, 4, y);
+
+                int botY = disp.height() - 13;
+                disp.fillRect(0, botY, disp.width(), 13, disp.color565(16, 16, 16));
+                disp.setTextColor(disp.color565(110, 110, 110), disp.color565(16, 16, 16));
+                disp.drawString("BtnG0 or ESC to cancel", 2, botY + 2);
+            }
+
+            playRegister(bootRegIndex);
+            M5Cardputer.Display.fillScreen(TFT_BLACK);
+        }
+    }
 
     mouseBatch.accumulatedX = 0;
     mouseBatch.accumulatedY = 0;
@@ -417,6 +472,7 @@ void setup() {
     static Cardputer::AppTOTProx     appTOTProx;
     static Cardputer::AppFileBrowser appFileBrowser;
     static Cardputer::AppKPSRunner   appKPSRunner;
+    static Cardputer::AppBootProx    appBootProx;
     static Cardputer::AppSettings    appSettings;
 
     // Registration order determines launcher icon index (0 = launcher, 1..N = user apps)
@@ -434,7 +490,8 @@ void setup() {
     Cardputer::uiManager.addApp(&appTOTProx);      // 11
     Cardputer::uiManager.addApp(&appFileBrowser);  // 12
     Cardputer::uiManager.addApp(&appKPSRunner);    // 13
-    Cardputer::uiManager.addApp(&appSettings); // 14
+    Cardputer::uiManager.addApp(&appBootProx);     // 14
+    Cardputer::uiManager.addApp(&appSettings); // 15
 
     // Load persisted app order/visibility (12 user apps, indices 1..12)
     loadAppLayout(12);

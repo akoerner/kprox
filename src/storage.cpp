@@ -324,3 +324,21 @@ void loadCsStorageLocation() {
     preferences.end();
     if (csStorageLocation != "sd") csStorageLocation = "nvs";
 }
+
+void saveBootRegSettings() {
+    preferences.begin("kprox", false);
+    preferences.putBool("bootRegEn",    bootRegEnabled);
+    preferences.putInt( "bootRegIdx",   bootRegIndex);
+    preferences.putInt( "bootRegLim",   bootRegLimit);
+    preferences.putInt( "bootRegFired", bootRegFiredCount);
+    preferences.end();
+}
+
+void loadBootRegSettings() {
+    preferences.begin("kprox", false);
+    bootRegEnabled    = preferences.getBool("bootRegEn",    false);
+    bootRegIndex      = preferences.getInt( "bootRegIdx",   0);
+    bootRegLimit      = preferences.getInt( "bootRegLim",   0);
+    bootRegFiredCount = preferences.getInt( "bootRegFired", 0);
+    preferences.end();
+}

@@ -2138,6 +2138,26 @@ function updateLoopStatusUI() {
     }
 }
 
+function updateBootProxStatusUI(bootReg) {
+    const el = document.getElementById('bootProxStatus');
+    if (!el) return;
+    if (!bootReg) { el.textContent = '-'; el.className = 'status-value'; return; }
+    if (!bootReg.enabled) {
+        el.textContent = 'Off';
+        el.className = 'status-value';
+        return;
+    }
+    const limit = bootReg.limit ?? 0;
+    const fired = bootReg.firedCount ?? 0;
+    const regNum = (bootReg.index ?? 0) + 1;
+    if (limit === 0) {
+        el.textContent = `Reg ${regNum} — every boot (${fired} fired)`;
+    } else {
+        el.textContent = `Reg ${regNum} — ${fired}/${limit}`;
+    }
+    el.className = 'status-value loop-active';
+}
+
 function updateActiveRegisterUI() {
     const sidebarActiveRegister = document.getElementById('sidebarActiveRegister');
     if (sidebarActiveRegister) {
@@ -2220,6 +2240,9 @@ async function showTab(tabName) {
     }
     if (tabName === 'totprox' && isConnected) {
         await loadTOTP();
+    }
+    if (tabName === 'bootprox' && isConnected) {
+        await loadBootReg();
     }
     if (tabName === 'filebrowser' && isConnected) {
         await fbRefresh();
@@ -3616,6 +3639,9 @@ async function loadSettingsTab() {
         if (d.appOrder && d.appHidden) {
             _renderAppLayout(d.appOrder, d.appHidden);
         }
+
+        // Boot register (populate if bootprox tab has been visited)
+        if (d.bootReg) { _applyBootReg(d.bootReg); updateBootProxStatusUI(d.bootReg); }
     } catch (e) {
         logDebug('loadSettingsTab: ' + e.message, 'warning');
     }
@@ -4694,6 +4720,7 @@ async function connect() {
             deviceLoopingRegister = data.looping_register;
         }
         updateLoopStatusUI();
+        if (data.bootReg) updateBootProxStatusUI(data.bootReg);
 
         if (data.hasOwnProperty('request_in_progress')) {
             requestInProgress = data.request_in_progress;
@@ -5435,6 +5462,7 @@ setInterval(async () => {
                     deviceLoopingRegister = data.looping_register;
                     updateLoopStatusUI();
                 }
+                if (data.bootReg) updateBootProxStatusUI(data.bootReg);
 
                 safeSetText('freeHeap', data.free_heap ? `${(data.free_heap / 1024).toFixed(1)} KB` : '-');
                 safeSetText('uptime', data.uptime ? `${Math.floor(data.uptime / 1000)}s` : '-');
@@ -6276,4 +6304,95 @@ function _kpsrefRender(filter) {
 function kpsrefDoSearch() {
     const q = document.getElementById('kpsrefSearch')?.value.trim();
     _kpsrefRender(q || undefined);
+}
+
+// ============================================================
+// BootProx
+// ============================================================
+
+async function loadBootReg() {
+    if (!isConnected) return;
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/settings`, { method: 'GET' });
+        if (!resp.ok) return;
+        const d = await resp.json();
+        if (d.bootReg) _applyBootReg(d.bootReg);
+        // Populate register select
+        const sel = document.getElementById('bootRegSelect');
+        if (sel && d.appNames) { /* names not registers */ }
+        await _populateBootRegSelect(d.bootReg?.index ?? 0);
+    } catch(e) { logDebug('loadBootReg: ' + e.message, 'error'); }
+}
+
+async function _populateBootRegSelect(currentIdx) {
+    const sel = document.getElementById('bootRegSelect');
+    if (!sel) return;
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/registers`, { method: 'GET' });
+        if (!resp.ok) return;
+        const d = await resp.json();
+        const regs = d.registers || [];
+        sel.innerHTML = regs.map((r, i) => {
+            const label = r.name ? `[${i+1}] ${escapeHtml(r.name)}` : `[${i+1}]`;
+            return `<option value="${i}">${label}</option>`;
+        }).join('');
+        sel.value = String(currentIdx);
+    } catch(e) { /* silent */ }
+}
+
+function _applyBootReg(br) {
+    const enabledEl = document.getElementById('bootRegEnabled');
+    const limitEl   = document.getElementById('bootRegLimit');
+    const badge     = document.getElementById('bootRegStatusBadge');
+    const fired     = document.getElementById('bootRegFiredBadge');
+    if (enabledEl) enabledEl.checked   = !!br.enabled;
+    if (limitEl)   limitEl.value       = br.limit ?? 0;
+    if (badge) {
+        badge.textContent = br.enabled ? 'ENABLED' : 'OFF';
+        badge.style.background = br.enabled ? '#198754' : '#343a40';
+        badge.style.color = '#fff';
+    }
+    const limit = br.limit ?? 0;
+    const fired2 = br.firedCount ?? 0;
+    if (fired) {
+        fired.textContent = limit > 0
+            ? `Fired: ${fired2} / ${limit}`
+            : `Fired: ${fired2}`;
+        fired.style.background = (limit > 0 && fired2 >= limit) ? '#dc3545' : '#343a40';
+        fired.style.color = '#fff';
+    }
+}
+
+async function saveBootReg() {
+    if (!isConnected) return;
+    const enabled = document.getElementById('bootRegEnabled')?.checked ?? false;
+    const index   = parseInt(document.getElementById('bootRegSelect')?.value ?? '0');
+    const limit   = parseInt(document.getElementById('bootRegLimit')?.value ?? '0');
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/settings`, {
+            method: 'POST',
+            body: JSON.stringify({ bootReg: { enabled, index, limit } })
+        });
+        if (resp.ok) {
+            _statusMsg('bootRegStatus', '\u2713 Saved.', true);
+            await loadBootReg();
+        } else {
+            const d = await resp.json();
+            _statusMsg('bootRegStatus', '\u2717 ' + (d.error || 'Save failed'), false);
+        }
+    } catch(e) { _statusMsg('bootRegStatus', '\u2717 ' + e.message, false); }
+}
+
+async function bootRegResetCount() {
+    if (!isConnected) return;
+    try {
+        const enabled = document.getElementById('bootRegEnabled')?.checked ?? false;
+        const index   = parseInt(document.getElementById('bootRegSelect')?.value ?? '0');
+        const limit   = parseInt(document.getElementById('bootRegLimit')?.value ?? '0');
+        const resp = await apiFetch(`${getApiEndpoint()}/api/settings`, {
+            method: 'POST',
+            body: JSON.stringify({ bootReg: { enabled: limit > 0 ? true : enabled, index, limit, firedCount: 0 } })
+        });
+        if (resp.ok) { _statusMsg('bootRegStatus', '\u2713 Count reset.', true); await loadBootReg(); }
+    } catch(e) { _statusMsg('bootRegStatus', '\u2717 ' + e.message, false); }
 }
