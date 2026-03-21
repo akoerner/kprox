@@ -361,12 +361,161 @@ Add accounts via the **TOTProx** cardputer app or the web interface (TOTProx tab
 
 `{PLAY_REGISTER arg}` — immediately executes the token string stored in the matched register. Uses the same name/index matching as `SET_ACTIVE_REGISTER`. No-op if no match.
 
+`{EXEC arg}` — like `PLAY_REGISTER` but passes the **current variable scope** into the register, making it behave as a sub-routine. Variables set inside the register persist in the caller's scope after it returns.
+
 ```
 {SET_ACTIVE_REGISTER Endless Mouse Square}
 {SET_ACTIVE_REGISTER 1}
 {PLAY_REGISTER Endless Mouse Square}
 {PLAY_REGISTER 1}
+{EXEC login_helper}
+{SET user admin}{EXEC fill_login_form}
 ```
+
+---
+
+## SD Card File Access — —
+
+Requires an SD card inserted. All paths are absolute from the SD root (e.g. `/scripts/login.kps`). Parent directories are created automatically for write operations.
+
+| Token | Description |
+|-------|-------------|
+| `{SD_READ path}` | Resolves to the full text content of the file |
+| `{SD_WRITE path content}` | Create or overwrite a file with `content` (no output) |
+| `{SD_APPEND path content}` | Append `content` to a file, creating it if absent (no output) |
+| `{SD_EXEC path}` | Execute a `.kps` script file from the SD card |
+
+Paths can be quoted or bare. Content can be a quoted string or a token expression.
+
+```
+{SD_READ /config/hostname.txt}
+{SET ip {SD_READ /config/ip.txt}}{ip}{ENTER}
+{SD_WRITE "/logs/access.log" "Login attempt from {KPROX_IP}"}
+{SD_APPEND /logs/access.log {KPROX_IP} logged in{ENTER}}
+{SD_EXEC /scripts/auto_login.kps}
+```
+
+---
+
+## KProx Script (.kps) — —
+
+KProx Script is a line-oriented programming language interpreted directly on the device. Scripts are stored on the SD card as `.kps` files and executed with `{SD_EXEC path}` or via the token `{SD_EXEC}`. Every `{TOKEN}` from the token reference works inside KPS string expressions.
+
+### Language overview
+
+```kps
+# Comments start with #
+
+# Variables
+set name "Alice"
+set count 5
+set greeting "Hello ${name}"
+
+# Echo sends the evaluated string to HID (keyboard output)
+echo "Hello ${name}{ENTER}"
+echo {CREDSTORE password github}
+
+# type is an alias for echo
+type "${greeting}{TAB}"
+
+# Sleep (milliseconds)
+sleep 500
+
+# Single key by name
+key ENTER
+key TAB
+key F5
+
+# Key chord
+chord CTRL+C
+chord GUI+R
+
+# Run a raw token string through the full token parser
+run "{CHORD CTRL+ALT+T}{SLEEP 800}htop{ENTER}"
+
+# If / elif / else / endif
+if ${count} == 5
+    echo "five"
+elif ${count} > 5
+    echo "big"
+else
+    echo "small"
+endif
+
+# Counter loop: for var start step end
+for i 1 1 10
+    echo "${i} "
+endfor
+
+# Decrement loop
+for i 10 -1 1
+    echo "${i}{ENTER}"
+endfor
+
+# While loop
+while ${count} > 0
+    set count {math ${count} - 1}
+endwhile
+
+# Infinite loop (break with ESC / BtnA, or use break)
+loop
+    echo "."
+    sleep 1000
+endloop
+
+# Timed loop (ms)
+loop 10000
+    chord CTRL+ALT+DELETE
+    sleep 500
+endloop
+
+# Break out of the innermost loop
+break
+
+# Return from the current script (does not propagate to caller)
+return
+
+# Include and execute another KPS file (shares variable scope)
+include "/scripts/helper.kps"
+
+# SD file operations
+sd_write "/logs/run.log" "Started at ${count}"
+sd_append "/logs/run.log" "Done"
+set cfg {sd_read "/config/profile.txt"}
+
+# WiFi connect
+wifi_connect "MySSID" "MyPassword"
+
+# Register operations
+play_register "Endless Mouse"
+play_register 2
+set_active_register 1
+
+# Halt / resume
+halt
+resume
+
+# Inline token expressions — all {TOKEN} tokens work in any string context
+set pass {CREDSTORE password github}
+set code {TOTP github}
+set ip   {KPROX_IP}
+echo "${pass}{TAB}${code}{ENTER}"
+```
+
+### Expressions and variable substitution
+
+Variables are referenced as `${varname}` inside any string argument. The entire `{TOKEN}` system (CREDSTORE, TOTP, MATH, RAND, SD_READ, etc.) is available inside quoted strings and bare word arguments:
+
+```kps
+set n {math ${n} + 1}
+set rand {RAND 1000 9999}
+set secret {CREDSTORE password mysite}
+echo "Code: {TOTP mysite}{ENTER}"
+```
+
+### Condition operators
+
+`==`  `!=`  `<`  `>`  `<=`  `>=` — string or numeric comparison (numeric when both sides parse as numbers).
 
 ---
 
@@ -387,12 +536,38 @@ Add accounts via the **TOTProx** cardputer app or the web interface (TOTProx tab
 | `{HALT}` | Stop all execution |
 | `{RESUME}` | Resume halted execution |
 | `{RELEASEALL}` | Release all held keys (BLE+USB) |
-| `{BLUETOOTH_ENABLE}` | Enable BLE HID |
-| `{BLUETOOTH_DISABLE}` | Disable BLE HID |
-| `{USB_ENABLE}` | Enable USB HID |
-| `{USB_DISABLE}` | Disable USB HID |
+| `{BLUETOOTH_ENABLE}` | Enable BLE HID (persisted) |
+| `{BLUETOOTH_DISABLE}` | Disable BLE HID (persisted) |
+| `{USB_ENABLE}` | Enable USB HID (persisted) |
+| `{USB_DISABLE}` | Disable USB HID (persisted) |
 | `{WIFI ssid password}` | Connect to WiFi |
 | `{SINKPROX}` | Flush and execute the SinkProx buffer |
+
+---
+
+## HID Output Routing — —
+
+These tokens selectively enable or disable HID output channels **for the duration of the current token string only**. The original state is automatically restored when the string finishes executing. Use them to target output at a specific transport without permanently changing device settings.
+
+`value` is any of: `true` / `false` / `1` / `0` / `enabled` / `disabled` / `on` / `off` (case-insensitive).
+
+| Token | Description |
+|-------|-------------|
+| `{BLUETOOTH_HID value}` | Enable or disable **all** BLE output (keyboard + mouse) |
+| `{BLUETOOTH_KEYBOARD value}` | Enable or disable BLE keyboard output only |
+| `{BLUETOOTH_MOUSE value}` | Enable or disable BLE mouse output only |
+| `{USB_HID value}` | Enable or disable **all** USB output (keyboard + mouse) |
+| `{USB_KEYBOARD value}` | Enable or disable USB keyboard output only |
+| `{USB_MOUSE value}` | Enable or disable USB mouse output only |
+
+Setting `BLUETOOTH_HID false` is equivalent to setting both `BLUETOOTH_KEYBOARD false` and `BLUETOOTH_MOUSE false`.
+
+```
+{BLUETOOTH_HID false}Hello{ENTER}
+{USB_HID false}{LOOP}{MOVEMOUSE {RAND -50 50} {RAND -50 50}}{SLEEP 500}{ENDLOOP}
+{USB_KEYBOARD false}{BLUETOOTH_KEYBOARD true}secret{ENTER}
+{BLUETOOTH_MOUSE false}{SETMOUSE 400 300}{MOUSECLICK}
+```
 
 ---
 

@@ -60,6 +60,8 @@ int  csGetFailedAttempts();
 void csResetFailedAttempts();
 
 // SD card helpers (always compiled; no-op on non-SD builds)
+bool sdMount();
+void sdUnmount();
 bool sdAvailable();
 bool sdExists();
 bool sdFormat();

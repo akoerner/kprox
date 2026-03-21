@@ -11,6 +11,8 @@
 #include "credential_store.h"
 #include "scheduled_tasks.h"
 #include "totp.h"
+#include "sd_utils.h"
+#include "kps_parser.h"
 #include <inttypes.h>
 #ifdef BOARD_M5STACK_CARDPUTER
 #include "cardputer/ui_manager.h"
@@ -835,6 +837,15 @@ void handleSettings() {
             orderArr.add(appOrder[i]);
             hiddenArr.add((i < appHidden.size()) ? appHidden[i] : false);
         }
+        // Dynamic app name list (launcher=0 excluded, indices 1-based)
+        JsonArray namesArr = doc["appNames"].to<JsonArray>();
+#ifdef BOARD_M5STACK_CARDPUTER
+        {
+            const auto& regApps = Cardputer::uiManager.apps();
+            for (size_t i = 1; i < regApps.size(); i++)
+                namesArr.add(regApps[i]->appName());
+        }
+#endif
         doc["timing"]["key_press_delay"]         = g_keyPressDelay;
         doc["timing"]["key_release_delay"]       = g_keyReleaseDelay;
         doc["timing"]["between_keys_delay"]      = g_betweenKeysDelay;
@@ -1987,6 +1998,106 @@ void handleTOTP() {
 
 // ---- Route setup ----
 
+void handleKpsRef() {
+    addCorsHeaders();
+    server.sendHeader("Connection", "close");
+    server.sendHeader("Cache-Control", "public, max-age=3600");
+    // Prefer SD card copy so users can update without reflashing
+    if (sdAvailable()) {
+        String md = sdReadFile("/KEYPROX_SCRIPT_REFERENCE.md");
+        if (!md.isEmpty()) {
+            server.send(200, "text/markdown; charset=utf-8", md);
+            server.client().stop(); return;
+        }
+    }
+    if (SPIFFS.exists("/KEYPROX_SCRIPT_REFERENCE.md")) {
+        File f = SPIFFS.open("/KEYPROX_SCRIPT_REFERENCE.md", "r");
+        if (f) { server.streamFile(f, "text/markdown; charset=utf-8"); f.close(); return; }
+    }
+    // Fallback: inline a minimal stub so the UI isn't empty first flash
+    server.send(200, "text/markdown; charset=utf-8",
+        "# KProx Script Reference\n\nFlash the SPIFFS image (run `pio run -t buildfs -t uploadfs`) to load the full reference, or place KEYPROX_SCRIPT_REFERENCE.md on the SD card.");
+    server.client().stop();
+}
+
+void handleSdApi() {
+    addCorsHeaders();
+    server.sendHeader("Connection", "close");
+    if (server.method() == HTTP_OPTIONS) { server.send(200); server.client().stop(); return; }
+    if (!checkApiKey()) return;
+
+    if (!sdAvailable()) {
+        server.send(503, "application/json", "{\"error\":\"SD card not available\"}");
+        server.client().stop(); return;
+    }
+
+    if (server.method() == HTTP_GET) {
+        String path   = server.arg("path");
+        String action = server.arg("action");
+        if (path.isEmpty()) path = "/";
+
+        if (action == "read") {
+            String content = sdReadFile(path);
+            JsonDocument doc;
+            doc["path"]    = path;
+            doc["content"] = content;
+            doc["size"]    = content.length();
+            String resp; serializeJson(doc, resp);
+            sendEncrypted(200, resp);
+        } else {
+            // List directory
+            String listing = sdListDir(path);
+            server.send(200, "application/json", listing);
+        }
+        server.client().stop(); return;
+    }
+
+    if (server.method() == HTTP_POST) {
+        if (!canProceed()) return;
+        JsonDocument doc;
+        if (!parseJsonBody(doc)) { requestComplete(); return; }
+        String action  = doc["action"] | "";
+        String path    = doc["path"]   | "";
+        String content = doc["content"]| "";
+
+        if (path.isEmpty()) {
+            server.send(400, "application/json", "{\"error\":\"path required\"}");
+            server.client().stop(); requestComplete(); return;
+        }
+
+        if (action == "write") {
+            bool ok = sdWriteFile(path, content);
+            sendEncrypted(ok ? 200 : 500, ok ? "{\"status\":\"ok\"}" : "{\"error\":\"write failed\"}");
+        } else if (action == "append") {
+            bool ok = sdAppendFile(path, content);
+            sendEncrypted(ok ? 200 : 500, ok ? "{\"status\":\"ok\"}" : "{\"error\":\"append failed\"}");
+        } else if (action == "delete") {
+            bool ok = sdDeleteFile(path);
+            sendEncrypted(ok ? 200 : 500, ok ? "{\"status\":\"ok\"}" : "{\"error\":\"delete failed\"}");
+        } else if (action == "mkdir") {
+            bool ok = sdMkdir(path);
+            sendEncrypted(ok ? 200 : 500, ok ? "{\"status\":\"ok\"}" : "{\"error\":\"mkdir failed\"}");
+        } else if (action == "rename") {
+            String newPath = doc["new_path"] | "";
+            if (newPath.isEmpty()) {
+                server.send(400, "application/json", "{\"error\":\"new_path required\"}");
+                server.client().stop(); requestComplete(); return;
+            }
+            String src = sdReadFile(path);
+            bool ok = sdWriteFile(newPath, src) && sdDeleteFile(path);
+            sendEncrypted(ok ? 200 : 500, ok ? "{\"status\":\"ok\"}" : "{\"error\":\"rename failed\"}");
+        } else if (action == "exec") {
+            kpsExecFile(path);
+            sendEncrypted(200, "{\"status\":\"ok\"}");
+        } else {
+            server.send(400, "application/json", "{\"error\":\"unknown action\"}");
+        }
+        server.client().stop(); requestComplete(); return;
+    }
+    server.send(405, "text/plain", "Method not allowed");
+    server.client().stop();
+}
+
 void setupRoutes() {
     server.on("/", HTTP_GET, []() {
         server.sendHeader("Connection", "close");
@@ -1999,6 +2110,9 @@ void setupRoutes() {
     });
 
     server.on("/api/docs",               HTTP_GET,     handleDocs);
+    server.on("/api/kpsref",             HTTP_GET,     handleKpsRef);
+    server.on("/api/sd",                 HTTP_GET,     handleSdApi);
+    server.on("/api/sd",                 HTTP_POST,    handleSdApi);
     server.on("/api/apiref",             HTTP_GET,     handleApiRef);
     server.on("/api/nonce",              HTTP_GET,     handleNonce);
     server.on("/api/status",             HTTP_GET,     handleApiStatus);
@@ -2056,7 +2170,7 @@ void setupRoutes() {
         "/api/discovery", "/api/network", "/api/registers/export",
         "/api/registers/import", "/api/ota", "/api/ota/spiffs",
         "/api/mtls", "/api/mtls/certs",
-        "/api/nonce", "/api/keymap", "/api/docs", "/api/apiref",
+        "/api/nonce", "/api/keymap", "/api/docs", "/api/apiref", "/api/kpsref", "/api/sd",
         "/api/credstore", "/api/credstore/rekey",
         "/api/totp",
         "/api/schedtasks"

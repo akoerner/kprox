@@ -681,13 +681,8 @@ void AppSettings::_drawPage8() {
     disp.fillScreen(SETTINGS_BG);
     _drawTopBar(8);
 
-    // App name list — must match registration order in main.cpp
-    static const char* APP_NAMES[] = {
-        "KProx", "FuzzyProx", "RegEdit", "CredStore",
-        "Gadgets", "SinkProx", "Keyboard", "Clock",
-        "QRProx", "SchedProx", "TOTProx", "Settings"
-    };
-    static constexpr int N_APPS = 12;
+    const auto& apps = uiManager.apps();
+    int N_APPS = (int)apps.size() - 1; // exclude launcher at 0
 
     int y = CONTENT_Y;
     disp.setTextSize(1);
@@ -696,11 +691,10 @@ void AppSettings::_drawPage8() {
 
     int visible = (disp.height() - y - BAR_BOT_H - 4) / 15;
     int scroll  = max(0, _idSel - visible + 1);
-    if (_idSel - (defaultAppIndex - 1) < 0) scroll = 0;
 
-    for (int i = 0; i < N_APPS && i < visible + scroll; i++) {
+    for (int i = 0; i < N_APPS && (i - scroll) < visible; i++) {
         if (i < scroll) continue;
-        int appIdx = i + 1; // launcher is 0, user apps start at 1
+        int appIdx = i + 1;
         bool sel = (_idSel == i);
         bool cur = (defaultAppIndex == appIdx);
         uint16_t rowBg = sel ? selBgColor() : (uint16_t)SETTINGS_BG;
@@ -708,7 +702,8 @@ void AppSettings::_drawPage8() {
 
         disp.setTextColor(sel ? TFT_WHITE : labelColor(), rowBg);
         char row[36];
-        snprintf(row, sizeof(row), "%s%s", sel ? "> " : "  ", APP_NAMES[i]);
+        const char* name = (appIdx < (int)apps.size()) ? apps[appIdx]->appName() : "?";
+        snprintf(row, sizeof(row), "%s%s", sel ? "> " : "  ", name);
         disp.drawString(row, 4, y);
 
         if (cur) {
@@ -731,7 +726,8 @@ void AppSettings::_drawPage8() {
 }
 
 void AppSettings::_handlePage8(KeyInput ki) {
-    static constexpr int N = 12;
+    int N = (int)uiManager.apps().size() - 1;
+    if (N < 1) N = 1;
     if (ki.arrowLeft)  { _page = 7; _timingSel = 0; _editing = false; _idSaved = false; _needsRedraw = true; }
     else if (ki.arrowRight) { _page = 9; _idSel = 0; _needsRedraw = true; }
     else if (ki.arrowUp)   { _idSel = (_idSel - 1 + N) % N; _idSaved = false; _needsRedraw = true; }
@@ -746,24 +742,20 @@ void AppSettings::_handlePage8(KeyInput ki) {
 
 // ---- Page 9: App Layout ----
 
-static const char* APP_LAYOUT_NAMES[] = {
-    "KProx", "FuzzyProx", "RegEdit", "CredStore",
-    "Gadgets", "SinkProx", "Keyboard", "Clock",
-    "QRProx", "SchedProx", "TOTProx", "Settings"
-};
-static constexpr int N_LAYOUT_APPS = 12;
-
 void AppSettings::_drawPage9() {
     auto& disp = M5Cardputer.Display;
     disp.fillScreen(SETTINGS_BG);
     _drawTopBar(9);
+
+    const auto& apps = uiManager.apps();
+    int N_LAYOUT_APPS = (int)apps.size() - 1; // exclude launcher
+    if (N_LAYOUT_APPS < 1) N_LAYOUT_APPS = 1;
 
     int y = CONTENT_Y;
     disp.setTextSize(1);
     disp.setTextColor(labelColor(), SETTINGS_BG);
     disp.drawString("App order & visibility:", 4, y); y += 14;
 
-    // Ensure appOrder is populated
     if ((int)appOrder.size() < N_LAYOUT_APPS) {
         for (int i = (int)appOrder.size() + 1; i <= N_LAYOUT_APPS; i++) appOrder.push_back(i);
     }
@@ -777,7 +769,7 @@ void AppSettings::_drawPage9() {
         if (i < scroll) continue;
         int slot   = i;
         int appIdx = appOrder[slot] - 1;  // 0-based into APP_LAYOUT_NAMES
-        bool isSettings = (appOrder[slot] == N_LAYOUT_APPS);  // Settings is always last registered
+        bool isSettings = (appOrder[slot] == N_LAYOUT_APPS);
         bool hidden = appHidden[slot];
         bool sel    = (_idSel == slot);
 
@@ -791,7 +783,7 @@ void AppSettings::_drawPage9() {
 
         // App name
         disp.setTextColor(sel ? TFT_WHITE : (hidden ? disp.color565(80, 80, 80) : labelColor()), rowBg);
-        const char* name = (appIdx >= 0 && appIdx < N_LAYOUT_APPS) ? APP_LAYOUT_NAMES[appIdx] : "?";
+        const char* name = (appIdx >= 0 && (appIdx + 1) < (int)apps.size()) ? apps[appIdx + 1]->appName() : "?";
         char lbl[24]; snprintf(lbl, sizeof(lbl), "%s%s", sel ? "> " : "  ", name);
         disp.drawString(lbl, 24, y);
 
@@ -830,6 +822,8 @@ void AppSettings::_drawPage9() {
 }
 
 void AppSettings::_handlePage9(KeyInput ki) {
+    int N_LAYOUT_APPS = (int)uiManager.apps().size() - 1;
+    if (N_LAYOUT_APPS < 1) N_LAYOUT_APPS = 1;
     if ((int)appOrder.size() < N_LAYOUT_APPS) {
         for (int i = (int)appOrder.size() + 1; i <= N_LAYOUT_APPS; i++) appOrder.push_back(i);
     }

@@ -28,6 +28,7 @@
                     <button id="connectBtn" class="connect-btn" onclick="connect()">Connect</button>
                     <button class="clear-debug-btn" onclick="clearDebugLog()">Clear Log</button>
                 </div>
+                <div id="debugInfo" class="debug-info" style="margin-top:6px;max-height:160px;"></div>
 
                 <div class="status-item">
                     <div class="status-label">Connection</div>
@@ -123,7 +124,6 @@
                     </div>
                 </div>
 
-                <div id="debugInfo" class="debug-info" style="margin-top:12px;"></div>
             </div>
 
             <div class="main-content">
@@ -138,6 +138,9 @@
                     <div class="tab" onclick="showTab('totprox')">TOTProx</div>
                     <div class="tab" onclick="showTab('gadgets')">Gadgets</div>
                     <div class="tab" onclick="showTab('keymap')">Keymap Editor</div>
+                    <div class="tab" onclick="showTab('filebrowser')">File Browser</div>
+                    <div class="tab" onclick="showTab('kpseditor')">KPScript Editor</div>
+                    <div class="tab" onclick="showTab('kpsref')">KPS Reference</div>
                 </div>
 
                 <!-- REGISTERS TAB -->
@@ -502,18 +505,7 @@
                         <div class="settings-field" style="max-width:360px;">
                             <label class="settings-label">Default App on Boot</label>
                             <select id="defaultAppSelect" style="width:100%;">
-                                <option value="1">KProx</option>
-                                <option value="2">FuzzyProx</option>
-                                <option value="3">RegEdit</option>
-                                <option value="4">CredStore</option>
-                                <option value="5">Gadgets</option>
-                                <option value="6">SinkProx</option>
-                                <option value="7">Keyboard HID</option>
-                                <option value="8">Clock</option>
-                                <option value="9">QRProx</option>
-                                <option value="10">SchedProx</option>
-                                <option value="11">TOTProx</option>
-                                <option value="12">Settings</option>
+                                <option value="">-- connect to load apps --</option>
                             </select>
                             <div class="settings-hint">App launched automatically on device boot. Takes effect after reboot.</div>
                         </div>
@@ -892,6 +884,83 @@
                         <div>
                             <button onclick="totpWipe()" class="danger-btn" style="width:auto;">Wipe All TOTP Data</button>
                         </div>
+                    </div>
+                </div>
+
+                <!-- FILE BROWSER TAB -->
+                <div id="filebrowser-tab" class="tab-content">
+                    <div class="section">
+                        <h3>File Browser</h3>
+                        <p class="settings-hint" style="margin-bottom:14px;">Browse and manage files on the SD card. Click a directory to navigate, a file to view/edit.</p>
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+                            <span id="fbSdBadge" style="font-size:12px;padding:3px 10px;border-radius:4px;background:#343a40;color:#adb5bd;">SD: unknown</span>
+                            <span id="fbPathLabel" style="font-size:13px;font-family:monospace;color:#495057;">/</span>
+                            <button onclick="fbNavUp()" style="padding:3px 10px;font-size:12px;background:#6c757d;">↑ Up</button>
+                            <button onclick="fbRefresh()" style="padding:3px 10px;font-size:12px;background:#6c757d;">Refresh</button>
+                            <button onclick="fbMkdir()" style="padding:3px 10px;font-size:12px;background:#0d6efd;">New Folder</button>
+                            <button onclick="fbNewFile()" style="padding:3px 10px;font-size:12px;background:#198754;">New File</button>
+                        </div>
+                        <div id="fbFileList" style="min-height:120px;border:1px solid #dee2e6;border-radius:4px;font-size:13px;margin-bottom:14px;"></div>
+                        <!-- File editor panel (shown when a file is selected) -->
+                        <div id="fbEditorPanel" style="display:none;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                                <span id="fbEditorFilename" style="font-family:monospace;font-size:13px;font-weight:600;"></span>
+                                <div style="display:flex;gap:6px;">
+                                    <button onclick="fbSaveFile()" style="padding:3px 12px;font-size:12px;background:#198754;">Save</button>
+                                    <button onclick="fbDeleteFile()" style="padding:3px 12px;font-size:12px;background:#dc3545;">Delete</button>
+                                    <button onclick="fbExecFile()" id="fbExecBtn" style="padding:3px 12px;font-size:12px;background:#6f42c1;display:none;">Run</button>
+                                    <button onclick="fbCloseEditor()" style="padding:3px 12px;font-size:12px;background:#6c757d;">Close</button>
+                                </div>
+                            </div>
+                            <textarea id="fbEditorContent" spellcheck="false"
+                                style="width:100%;box-sizing:border-box;height:300px;font-family:monospace;font-size:12px;
+                                       background:#1e1e1e;color:#d4d4d4;border:1px solid #444;border-radius:4px;
+                                       padding:8px;resize:vertical;tab-size:4;"></textarea>
+                            <div id="fbEditorStatus" style="font-size:12px;margin-top:4px;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- KPS EDITOR TAB -->
+                <div id="kpseditor-tab" class="tab-content">
+                    <div class="section">
+                        <h3>KPScript Editor</h3>
+                        <p class="settings-hint" style="margin-bottom:14px;">Write, save, and execute KProx Script (.kps) files. Scripts run on the device — any <code>echo</code> output goes to HID.</p>
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+                            <select id="kpsScriptSelect" style="flex:1;min-width:180px;font-family:monospace;font-size:13px;" onchange="kpsSelectScript()">
+                                <option value="">-- New script --</option>
+                            </select>
+                            <button onclick="kpsLoadScriptList()" style="padding:3px 10px;font-size:12px;background:#6c757d;">Refresh</button>
+                            <button onclick="kpsNew()" style="padding:3px 10px;font-size:12px;background:#6c757d;">New</button>
+                        </div>
+                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+                            <input type="text" id="kpsFilePath" placeholder="/scripts/untitled.kps"
+                                   style="flex:1;min-width:200px;font-family:monospace;font-size:13px;
+                                          padding:5px 8px;border:1px solid #ccc;border-radius:4px;" />
+                            <button onclick="kpsSave()" style="padding:4px 14px;background:#198754;color:#fff;">Save</button>
+                            <button onclick="kpsDelete()" style="padding:4px 14px;background:#dc3545;color:#fff;">Delete</button>
+                            <button onclick="kpsRun()" style="padding:4px 16px;background:#6f42c1;color:#fff;font-weight:600;">▶ Run</button>
+                        </div>
+                        <textarea id="kpsEditorContent" spellcheck="false" placeholder="# KProx Script&#10;set greeting &quot;Hello World&quot;&#10;echo &quot;${greeting}{ENTER}&quot;"
+                            style="width:100%;box-sizing:border-box;height:380px;font-family:monospace;font-size:13px;
+                                   background:#1e1e1e;color:#d4d4d4;border:1px solid #444;border-radius:4px;
+                                   padding:10px;resize:vertical;tab-size:4;line-height:1.5;"
+                            onkeydown="kpsHandleTab(event)"></textarea>
+                        <div id="kpsStatus" class="settings-status" style="margin-top:6px;"></div>
+                    </div>
+                </div>
+
+                <!-- KPS REFERENCE TAB -->
+                <div id="kpsref-tab" class="tab-content">
+                    <div class="section">
+                        <h3>KProx Script Reference</h3>
+                        <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;">
+                            <input type="text" id="kpsrefSearch" class="search-box"
+                                   placeholder="Search language reference..."
+                                   oninput="kpsrefDoSearch()" style="flex:1;min-width:200px;">
+                            <button onclick="kpsrefLoad(true)" style="font-size:12px;padding:3px 12px;background:#6c757d;">Reload</button>
+                        </div>
+                        <div id="kpsrefContent" style="font-size:13px;line-height:1.6;"></div>
                     </div>
                 </div>
 

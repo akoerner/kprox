@@ -2221,6 +2221,15 @@ async function showTab(tabName) {
     if (tabName === 'totprox' && isConnected) {
         await loadTOTP();
     }
+    if (tabName === 'filebrowser' && isConnected) {
+        await fbRefresh();
+    }
+    if (tabName === 'kpseditor' && isConnected) {
+        await kpsLoadScriptList();
+    }
+    if (tabName === 'kpsref') {
+        await kpsrefLoad();
+    }
 }
 
 // ---- Credential Store ----
@@ -3557,6 +3566,18 @@ async function loadSettingsTab() {
         const ep = document.getElementById('settingsApiEndpoint');
         if (ep && !ep.value) ep.value = getApiEndpoint();
 
+        // Populate app name list from API (dynamic — reflects registered apps)
+        if (d.appNames && d.appNames.length) {
+            APP_NAMES = d.appNames;
+            const sel = document.getElementById('defaultAppSelect');
+            if (sel) {
+                const cur = sel.value;
+                sel.innerHTML = d.appNames
+                    .map((name, i) => `<option value="${i + 1}">${escapeHtml(name)}</option>`)
+                    .join('');
+                if (cur) sel.value = cur;
+            }
+        }
         // Default app selector
         if (d.defaultApp !== undefined) {
             const sel = document.getElementById('defaultAppSelect');
@@ -3602,7 +3623,7 @@ async function loadSettingsTab() {
 
 // ---- App Layout ----
 
-const APP_NAMES = ['KProx','FuzzyProx','RegEdit','CredStore','Gadgets','SinkProx','Keyboard','Clock','QRProx','SchedProx','TOTProx','Settings'];
+let APP_NAMES = ['KProx','FuzzyProx','RegEdit','CredStore','Gadgets','SinkProx','Keyboard','Clock','QRProx','SchedProx','TOTProx','Settings']; // overwritten from API
 let _appOrder  = [];
 let _appHidden = [];
 
@@ -5885,3 +5906,374 @@ async function loadKeymapSettings() { return keymapEditorInit(); }
 async function setKeymap()          { return keymapSetActive(); }
 async function uploadKeymap()       { return keymapUploadFile(); }
 async function deleteKeymap()       { return keymapDeleteSelected(); }
+
+// ============================================================
+// File Browser
+// ============================================================
+
+let _fbPath     = '/';
+let _fbEditPath = '';
+
+async function fbRefresh() {
+    if (!isConnected) return;
+    const badge  = document.getElementById('fbSdBadge');
+    const list   = document.getElementById('fbFileList');
+    const pathEl = document.getElementById('fbPathLabel');
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/sd?path=${encodeURIComponent(_fbPath)}`);
+        if (resp.status === 404) {
+            if (badge) { badge.textContent = 'SD: reflash firmware'; badge.style.background = '#856404'; badge.style.color = '#fff'; }
+            if (list)  list.innerHTML = '<p style="padding:10px;color:#856404;">SD API not available — reflash firmware with latest build.</p>';
+            return;
+        }
+        if (resp.status === 503) {
+            if (badge) { badge.textContent = 'SD: not inserted'; badge.style.background = '#6c757d'; badge.style.color = '#fff'; }
+            if (list)  list.innerHTML = '<p style="padding:10px;color:#6c757d;">SD card not inserted or not readable.</p>';
+            return;
+        }
+        if (!resp.ok) {
+            if (badge) { badge.textContent = 'SD: error'; badge.style.background = '#dc3545'; badge.style.color = '#fff'; }
+            if (list)  list.innerHTML = `<p style="padding:10px;color:#dc3545;">Error ${resp.status}</p>`;
+            return;
+        }
+        // The directory listing returns a plain JSON array (not encrypted)
+        const data = resp._data;
+        const entries = Array.isArray(data) ? data : (await resp.json());
+        if (badge) { badge.textContent = 'SD: available'; badge.style.background = '#198754'; badge.style.color = '#fff'; }
+        if (pathEl) pathEl.textContent = _fbPath || '/';
+        _fbRenderList(Array.isArray(entries) ? entries : []);
+    } catch(e) {
+        if (badge) { badge.textContent = 'SD: unknown'; badge.style.background = '#343a40'; badge.style.color = '#adb5bd'; }
+        if (list)  list.innerHTML = '<p style="padding:10px;color:#dc3545;">Error: ' + e.message + '. Ensure device is connected and firmware is up to date.</p>';
+    }
+}
+
+function _fbRenderList(entries) {
+    const list = document.getElementById('fbFileList');
+    if (!list) return;
+    if (!entries || entries.length === 0) {
+        list.innerHTML = '<p style="padding:10px;color:#6c757d;font-style:italic;">Empty directory.</p>';
+        return;
+    }
+    const dirs  = entries.filter(e => e.type === 'dir');
+    const files = entries.filter(e => e.type === 'file');
+    const sorted = [...dirs, ...files];
+    let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+    html += '<thead><tr style="background:#f8f9fa;border-bottom:2px solid #dee2e6;">';
+    html += '<th style="padding:5px 8px;text-align:left;">Name</th>';
+    html += '<th style="padding:5px 8px;text-align:right;width:70px;">Size</th>';
+    html += '<th style="padding:5px 8px;width:80px;"></th>';
+    html += '</tr></thead><tbody>';
+    if (_fbPath && _fbPath !== '/') {
+        html += `<tr style="border-bottom:1px solid #dee2e6;cursor:pointer;" onclick="fbNavUp()">
+            <td style="padding:5px 8px;font-family:monospace;">📁 ..</td>
+            <td></td><td></td></tr>`;
+    }
+    for (const e of sorted) {
+        const icon = e.type === 'dir' ? '📁' : (e.name.endsWith('.kps') ? '📜' : '📄');
+        const sizeStr = e.type === 'file' ? (e.size >= 1024 ? Math.round(e.size/1024)+'k' : e.size+'b') : '';
+        const nameEnc = escapeHtml(e.name);
+        const isKps = e.type === 'file' && e.name.toLowerCase().endsWith('.kps');
+        html += `<tr style="border-bottom:1px solid #dee2e6;">
+            <td style="padding:5px 8px;font-family:monospace;cursor:pointer;"
+                onclick="${e.type === 'dir' ? `fbNavTo('${e.name.replace(/'/g,"\'")}')` : `fbOpenFile('${e.name.replace(/'/g,"\'")}')` }">${icon} ${nameEnc}</td>
+            <td style="padding:5px 8px;text-align:right;color:#6c757d;font-size:11px;">${sizeStr}</td>
+            <td style="padding:5px 8px;text-align:right;">
+                ${isKps ? `<button onclick="fbRunKps('${e.name.replace(/'/g,"\'")}',event)" style="padding:2px 7px;font-size:11px;background:#6f42c1;color:#fff;border:none;border-radius:3px;cursor:pointer;margin-right:3px;">Run</button>` : ''}
+                <button onclick="fbDeleteEntry('${e.name.replace(/'/g,"\'")}',event)" style="padding:2px 7px;font-size:11px;background:#dc3545;color:#fff;border:none;border-radius:3px;cursor:pointer;">Del</button>
+            </td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    list.innerHTML = html;
+}
+
+function fbNavTo(name) {
+    _fbPath = (_fbPath === '/' ? '' : _fbPath) + '/' + name;
+    fbRefresh();
+    fbCloseEditor();
+}
+
+function fbNavUp() {
+    const parts = _fbPath.split('/').filter(Boolean);
+    parts.pop();
+    _fbPath = parts.length ? '/' + parts.join('/') : '/';
+    fbRefresh();
+    fbCloseEditor();
+}
+
+async function fbOpenFile(name) {
+    const path = (_fbPath === '/' ? '' : _fbPath) + '/' + name;
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/sd?path=${encodeURIComponent(path)}&action=read`);
+        const data = await resp.json();
+        _fbEditPath = path;
+        document.getElementById('fbEditorFilename').textContent = path;
+        document.getElementById('fbEditorContent').value = data.content || '';
+        document.getElementById('fbEditorPanel').style.display = '';
+        const runBtn = document.getElementById('fbExecBtn');
+        if (runBtn) runBtn.style.display = name.toLowerCase().endsWith('.kps') ? '' : 'none';
+        document.getElementById('fbEditorStatus').textContent = '';
+        document.getElementById('fbEditorContent').focus();
+    } catch(e) {
+        alert('Could not open file: ' + e.message);
+    }
+}
+
+async function fbSaveFile() {
+    const content = document.getElementById('fbEditorContent').value;
+    const status  = document.getElementById('fbEditorStatus');
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/sd`, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'write', path: _fbEditPath, content })
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            status.textContent = '✓ Saved'; status.style.color = '#198754';
+            fbRefresh();
+        } else {
+            status.textContent = '✗ ' + (data.error || 'Save failed'); status.style.color = '#dc3545';
+        }
+    } catch(e) { status.textContent = '✗ ' + e.message; status.style.color = '#dc3545'; }
+}
+
+async function fbDeleteFile() {
+    if (!_fbEditPath || !confirm('Delete ' + _fbEditPath + '?')) return;
+    try {
+        await apiFetch(`${getApiEndpoint()}/api/sd`, {
+            method: 'POST', body: JSON.stringify({ action: 'delete', path: _fbEditPath })
+        });
+        fbCloseEditor();
+        fbRefresh();
+    } catch(e) { alert('Delete failed: ' + e.message); }
+}
+
+async function fbDeleteEntry(name, evt) {
+    if (evt) evt.stopPropagation();
+    const path = (_fbPath === '/' ? '' : _fbPath) + '/' + name;
+    if (!confirm('Delete ' + path + '?')) return;
+    try {
+        await apiFetch(`${getApiEndpoint()}/api/sd`, {
+            method: 'POST', body: JSON.stringify({ action: 'delete', path })
+        });
+        fbRefresh();
+    } catch(e) { alert('Delete failed: ' + e.message); }
+}
+
+async function fbExecFile() {
+    if (!_fbEditPath) return;
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/sd`, {
+            method: 'POST', body: JSON.stringify({ action: 'exec', path: _fbEditPath })
+        });
+        const st = document.getElementById('fbEditorStatus');
+        if (resp.ok) { st.textContent = '✓ Executed'; st.style.color = '#198754'; }
+        else { const d = await resp.json(); st.textContent = '✗ ' + (d.error||'Failed'); st.style.color = '#dc3545'; }
+    } catch(e) { alert('Execute failed: ' + e.message); }
+}
+
+async function fbRunKps(name, evt) {
+    if (evt) evt.stopPropagation();
+    const path = (_fbPath === '/' ? '' : _fbPath) + '/' + name;
+    if (!confirm('Run ' + name + '?')) return;
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/sd`, {
+            method: 'POST', body: JSON.stringify({ action: 'exec', path })
+        });
+        if (!resp.ok) { const d = await resp.json(); alert('Run failed: ' + (d.error||'unknown')); }
+    } catch(e) { alert('Run failed: ' + e.message); }
+}
+
+async function fbMkdir() {
+    const name = prompt('New folder name:');
+    if (!name) return;
+    const path = (_fbPath === '/' ? '' : _fbPath) + '/' + name;
+    try {
+        await apiFetch(`${getApiEndpoint()}/api/sd`, {
+            method: 'POST', body: JSON.stringify({ action: 'mkdir', path })
+        });
+        fbRefresh();
+    } catch(e) { alert('mkdir failed: ' + e.message); }
+}
+
+async function fbNewFile() {
+    const name = prompt('File name (e.g. script.kps):');
+    if (!name) return;
+    const path = (_fbPath === '/' ? '' : _fbPath) + '/' + name;
+    await apiFetch(`${getApiEndpoint()}/api/sd`, {
+        method: 'POST', body: JSON.stringify({ action: 'write', path, content: '' })
+    });
+    fbRefresh();
+    fbOpenFile(name);
+}
+
+function fbCloseEditor() {
+    _fbEditPath = '';
+    const panel = document.getElementById('fbEditorPanel');
+    if (panel) panel.style.display = 'none';
+}
+
+// ============================================================
+// KPS Script Editor
+// ============================================================
+
+let _kpsScripts = [];
+
+async function kpsLoadScriptList() {
+    if (!isConnected) return;
+    const sel = document.getElementById('kpsScriptSelect');
+    if (!sel) return;
+    try {
+        const entries = await _kpsScanDir('/scripts', []);
+        _kpsScripts = entries;
+        const current = sel.value;
+        sel.innerHTML = '<option value="">-- New script --</option>';
+        for (const p of entries) sel.innerHTML += `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`;
+        if (current && entries.includes(current)) sel.value = current;
+    } catch(e) { /* silent — SD may be absent */ }
+}
+
+async function _kpsScanDir(dir, results) {
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/sd?path=${encodeURIComponent(dir)}`);
+        if (!resp.ok) return results;
+        const entries = await resp.json();
+        for (const e of entries) {
+            const full = (dir === '/' ? '' : dir) + '/' + e.name;
+            if (e.type === 'dir') { await _kpsScanDir(full, results); }
+            else if (e.name.toLowerCase().endsWith('.kps')) results.push(full);
+        }
+    } catch(e) { /* silent */ }
+    return results;
+}
+
+async function kpsSelectScript() {
+    const sel = document.getElementById('kpsScriptSelect');
+    if (!sel || !sel.value) return;
+    const path = sel.value;
+    document.getElementById('kpsFilePath').value = path;
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/sd?path=${encodeURIComponent(path)}&action=read`);
+        const data = await resp.json();
+        document.getElementById('kpsEditorContent').value = data.content || '';
+        _statusMsg2('kpsStatus', '', true);
+    } catch(e) { _statusMsg2('kpsStatus', '✗ Load failed: ' + e.message, false); }
+}
+
+function kpsNew() {
+    document.getElementById('kpsScriptSelect').value = '';
+    document.getElementById('kpsFilePath').value = '/scripts/';
+    document.getElementById('kpsEditorContent').value = '# New KProx Script\n\n';
+    document.getElementById('kpsFilePath').focus();
+}
+
+async function kpsSave() {
+    const path    = document.getElementById('kpsFilePath')?.value.trim();
+    const content = document.getElementById('kpsEditorContent')?.value;
+    if (!path) { _statusMsg2('kpsStatus', '✗ File path required', false); return; }
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/sd`, {
+            method: 'POST', body: JSON.stringify({ action: 'write', path, content })
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            _statusMsg2('kpsStatus', '✓ Saved to ' + path, true);
+            await kpsLoadScriptList();
+            document.getElementById('kpsScriptSelect').value = path;
+        } else {
+            _statusMsg2('kpsStatus', '✗ ' + (data.error || 'Save failed'), false);
+        }
+    } catch(e) { _statusMsg2('kpsStatus', '✗ ' + e.message, false); }
+}
+
+async function kpsDelete() {
+    const path = document.getElementById('kpsFilePath')?.value.trim();
+    if (!path || !confirm('Delete ' + path + '?')) return;
+    try {
+        await apiFetch(`${getApiEndpoint()}/api/sd`, {
+            method: 'POST', body: JSON.stringify({ action: 'delete', path })
+        });
+        _statusMsg2('kpsStatus', '✓ Deleted', true);
+        kpsNew();
+        await kpsLoadScriptList();
+    } catch(e) { _statusMsg2('kpsStatus', '✗ ' + e.message, false); }
+}
+
+async function kpsRun() {
+    const path    = document.getElementById('kpsFilePath')?.value.trim();
+    const content = document.getElementById('kpsEditorContent')?.value;
+    if (!path) { _statusMsg2('kpsStatus', '✗ Save the script first', false); return; }
+    // Auto-save then exec
+    try {
+        await apiFetch(`${getApiEndpoint()}/api/sd`, {
+            method: 'POST', body: JSON.stringify({ action: 'write', path, content })
+        });
+        const resp = await apiFetch(`${getApiEndpoint()}/api/sd`, {
+            method: 'POST', body: JSON.stringify({ action: 'exec', path })
+        });
+        const data = await resp.json();
+        if (resp.ok) _statusMsg2('kpsStatus', '✓ Running...', true);
+        else         _statusMsg2('kpsStatus', '✗ ' + (data.error || 'Run failed'), false);
+    } catch(e) { _statusMsg2('kpsStatus', '✗ ' + e.message, false); }
+}
+
+function kpsHandleTab(e) {
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    const ta = e.target;
+    const s = ta.selectionStart, end = ta.selectionEnd;
+    ta.value = ta.value.substring(0, s) + '    ' + ta.value.substring(end);
+    ta.selectionStart = ta.selectionEnd = s + 4;
+}
+
+function _statusMsg2(id, msg, ok) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = msg;
+    el.style.color = ok ? '#198754' : '#dc3545';
+}
+
+// ============================================================
+// KPS Reference
+// ============================================================
+
+let _kpsrefMd  = null;
+
+async function kpsrefLoad(force) {
+    if (_kpsrefMd && !force) { _kpsrefRender(); return; }
+    const el = document.getElementById('kpsrefContent');
+    if (!el) return;
+    el.innerHTML = '<p style="color:#6c757d;font-size:13px;">Loading KPS reference...</p>';
+    try {
+        const endpoint = getApiEndpoint ? getApiEndpoint() : '';
+        const resp = await fetch(endpoint + '/api/kpsref');
+
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        _kpsrefMd = await resp.text();
+        _kpsrefRender();
+    } catch(e) {
+        el.innerHTML = '<p style="color:#dc3545;font-size:13px;">Could not load reference: ' + e.message + '. Connect to device first.</p>';
+    }
+}
+
+function _kpsrefRender(filter) {
+    const el = document.getElementById('kpsrefContent');
+    if (!el || !_kpsrefMd) return;
+    const html = _mdToHtml ? _mdToHtml(_kpsrefMd) : '<pre>' + escapeHtml(_kpsrefMd) + '</pre>';
+    if (!filter) {
+        el.innerHTML = html;
+    } else {
+        const q = filter.toLowerCase();
+        const secs = _kpsrefMd.split(/(?=^## )/m);
+        const matched = secs.filter(s => s.toLowerCase().includes(q));
+        el.innerHTML = matched.length
+            ? (_mdToHtml ? matched.map(_mdToHtml).join('') : '<pre>' + escapeHtml(matched.join('')) + '</pre>')
+            : '<p style="color:#6c757d;font-style:italic;">No matches.</p>';
+    }
+}
+
+function kpsrefDoSearch() {
+    const q = document.getElementById('kpsrefSearch')?.value.trim();
+    _kpsrefRender(q || undefined);
+}

@@ -1,6 +1,8 @@
 #include "token_parser.h"
 #include "hid.h"
 #include "registers.h"
+#include "kps_parser.h"
+#include "sd_utils.h"
 #include "connection.h"
 #include "keymap.h"
 #include "storage.h"
@@ -16,7 +18,7 @@
 // ---- Interrupt check ----
 // Called at every delay/yield point inside the parser. Feeds the watchdog and
 // checks whether BtnA or ESC/backtick has been pressed; if so, halts execution.
-static void checkParseInterrupt() {
+void checkParseInterrupt() {
     feedWatchdog();
 #ifdef BOARD_M5STACK_CARDPUTER
     M5Cardputer.update();
@@ -257,7 +259,7 @@ static double evaluateMathExpression(const String& expression, std::map<String, 
     }
 }
 
-static String evaluateAllTokens(String input, std::map<String, String>& vars);
+String evaluateAllTokens(const String& text, std::map<String, String>& vars);
 
 static bool evaluateCondition(const String& condition, std::map<String, String>& vars) {
     int opStart = -1, opLen = 0, depth = 0;
@@ -310,7 +312,8 @@ static bool evaluateCondition(const String& condition, std::map<String, String>&
     return false;
 }
 
-static String evaluateAllTokens(String input, std::map<String, String>& vars) {
+String evaluateAllTokens(const String& text, std::map<String, String>& vars) {
+    String input = text;
     bool changed = true;
     int iterations = 0;
 
@@ -411,6 +414,21 @@ static String evaluateAllTokens(String input, std::map<String, String>& vars) {
                 replacement = String(buf);
             }
             resolved = true;
+        } else if (upperToken.startsWith("SD_READ ")) {
+            String path = token.substring(8);
+            path.trim();
+            if (path.startsWith(""") && path.endsWith("""))
+                path = path.substring(1, path.length() - 1);
+            replacement = sdReadFile(path);
+            resolved    = true;
+        } else if (upperToken.startsWith("EXEC ")) {
+            // Execute a named/indexed register with the current variable scope
+            String arg = evaluateAllTokens(token.substring(5), vars);
+            arg.trim();
+            int idx = resolveRegisterArg(arg);
+            if (idx >= 0 && !registers[idx].isEmpty())
+                parseAndSendText(registers[idx], vars);
+            resolved = true;
         }
 
         if (resolved) {
@@ -469,7 +487,7 @@ static bool isKeyToken(const String& upper) {
             (upper.startsWith("F") && upper.length() <= 3 && upper.substring(1).toInt() >= 13 && upper.substring(1).toInt() <= 24));
 }
 
-static int resolveRegisterArg(const String& arg) {
+int resolveRegisterArg(const String& arg) {
     bool allDigits = !arg.isEmpty();
     for (char c : arg) { if (!isDigit(c)) { allDigits = false; break; } }
     if (allDigits) {
@@ -496,6 +514,10 @@ static bool isControlToken(const String& token) {
     return (u == "RELEASEALL" ||
             u == "BLUETOOTH_ENABLE" || u == "BLUETOOTH_DISABLE" ||
             u == "USB_ENABLE"       || u == "USB_DISABLE"       ||
+            u.startsWith("BLUETOOTH_HID ")      || u.startsWith("BLUETOOTH_KEYBOARD ") ||
+            u.startsWith("BLUETOOTH_MOUSE ")    ||
+            u.startsWith("USB_HID ")            || u.startsWith("USB_KEYBOARD ")       ||
+            u.startsWith("USB_MOUSE ")          ||
             u == "HALT"     || u == "RESUME"  || u == "SINKPROX"  ||
             u == "ENDLOOP"  || u == "ENDFOR"  || u == "ENDWHILE"  ||
             u == "ELSE"     || u == "ENDIF"   || u == "BREAK"     ||
@@ -506,7 +528,9 @@ static bool isControlToken(const String& token) {
             u.startsWith("LOOP")        || u.startsWith("FOR ")         || u.startsWith("WHILE ")      ||
             u.startsWith("BREAK ")      || u.startsWith("SCHEDULE ")    ||
             u.startsWith("SET ")        || u.startsWith("IF ")          || u.startsWith("KEYMAP") ||
-            u.startsWith("SET_ACTIVE_REGISTER ") || u.startsWith("PLAY_REGISTER "));
+            u.startsWith("SET_ACTIVE_REGISTER ") || u.startsWith("PLAY_REGISTER ") ||
+            u.startsWith("SD_WRITE ")  || u.startsWith("SD_APPEND ") ||
+            u.startsWith("SD_EXEC ")   || u.startsWith("EXEC "));
 }
 
 // ---- Key token resolution ----
@@ -633,6 +657,31 @@ static void dispatchKeyToken(const String& tokenRaw, std::map<String, String>& v
 
 void parseAndSendText(const String& text, std::map<String, String>& vars) {
     if (g_parserAbort) return;
+    // Snapshot HID routing flags so per-string overrides don't persist
+    const bool _saveBleKb  = bleKeyboardEnabled;
+    const bool _saveBleMo  = bleMouseEnabled;
+#ifdef BOARD_HAS_USB_HID
+    const bool _saveUsbKb  = usbKeyboardEnabled;
+    const bool _saveUsbMo  = usbMouseEnabled;
+#endif
+    struct _HIDRestore {
+        bool bleKb, bleMo;
+#ifdef BOARD_HAS_USB_HID
+        bool usbKb, usbMo;
+#endif
+        ~_HIDRestore() {
+            bleKeyboardEnabled = bleKb;
+            bleMouseEnabled    = bleMo;
+#ifdef BOARD_HAS_USB_HID
+            usbKeyboardEnabled = usbKb;
+            usbMouseEnabled    = usbMo;
+#endif
+        }
+    } _restore{_saveBleKb, _saveBleMo
+#ifdef BOARD_HAS_USB_HID
+        , _saveUsbKb, _saveUsbMo
+#endif
+    };
 
     int pos = 0;
     String currentSegment;
@@ -674,6 +723,36 @@ void parseAndSendText(const String& text, std::map<String, String>& vars) {
         else if (u == "BLUETOOTH_DISABLE") disableBluetooth();
         else if (u == "USB_ENABLE")        enableUSB();
         else if (u == "USB_DISABLE")       disableUSB();
+        else if (u.startsWith("BLUETOOTH_HID ")) {
+            String v = evaluateAllTokens(token.substring(14), vars); v.trim(); v.toLowerCase();
+            bool en = (v == "1" || v == "true" || v == "enabled" || v == "on");
+            bleKeyboardEnabled = en;
+            bleMouseEnabled    = en;
+        }
+        else if (u.startsWith("BLUETOOTH_KEYBOARD ")) {
+            String v = evaluateAllTokens(token.substring(19), vars); v.trim(); v.toLowerCase();
+            bleKeyboardEnabled = (v == "1" || v == "true" || v == "enabled" || v == "on");
+        }
+        else if (u.startsWith("BLUETOOTH_MOUSE ")) {
+            String v = evaluateAllTokens(token.substring(16), vars); v.trim(); v.toLowerCase();
+            bleMouseEnabled = (v == "1" || v == "true" || v == "enabled" || v == "on");
+        }
+#ifdef BOARD_HAS_USB_HID
+        else if (u.startsWith("USB_HID ")) {
+            String v = evaluateAllTokens(token.substring(8), vars); v.trim(); v.toLowerCase();
+            bool en = (v == "1" || v == "true" || v == "enabled" || v == "on");
+            usbKeyboardEnabled = en;
+            usbMouseEnabled    = en;
+        }
+        else if (u.startsWith("USB_KEYBOARD ")) {
+            String v = evaluateAllTokens(token.substring(13), vars); v.trim(); v.toLowerCase();
+            usbKeyboardEnabled = (v == "1" || v == "true" || v == "enabled" || v == "on");
+        }
+        else if (u.startsWith("USB_MOUSE ")) {
+            String v = evaluateAllTokens(token.substring(10), vars); v.trim(); v.toLowerCase();
+            usbMouseEnabled = (v == "1" || v == "true" || v == "enabled" || v == "on");
+        }
+#endif
         else if (u == "SINKPROX") {
             if (SPIFFS.exists("/sink.txt")) {
                 File f = SPIFFS.open("/sink.txt", "r");
@@ -931,6 +1010,44 @@ void parseAndSendText(const String& text, std::map<String, String>& vars) {
             arg.trim();
             int idx = resolveRegisterArg(arg);
             if (idx >= 0) playRegister(idx);
+        }
+        else if (u.startsWith("SD_WRITE ") || u.startsWith("SD_APPEND ")) {
+            int prefixLen = u.startsWith("SD_WRITE ") ? 9 : 10;
+            String sdRest = evaluateAllTokens(token.substring(prefixLen), vars);
+            sdRest.trim();
+            String sdPath, sdContent;
+            if (!sdRest.isEmpty() && sdRest[0] == '"') {
+                int closeQ = sdRest.indexOf('"', 1);
+                if (closeQ > 0) {
+                    sdPath    = sdRest.substring(1, closeQ);
+                    sdContent = sdRest.substring(closeQ + 1);
+                    sdContent.trim();
+                }
+            } else {
+                int sp2 = sdRest.indexOf(' ');
+                if (sp2 > 0) {
+                    sdPath    = sdRest.substring(0, sp2);
+                    sdContent = sdRest.substring(sp2 + 1);
+                    sdContent.trim();
+                } else {
+                    sdPath = sdRest;
+                }
+            }
+            if (!sdContent.isEmpty() && sdContent[0] == '"' &&
+                sdContent[sdContent.length()-1] == '"' && sdContent.length() > 1)
+                sdContent = sdContent.substring(1, sdContent.length() - 1);
+            if (!sdPath.isEmpty()) {
+                if (u.startsWith("SD_WRITE ")) sdWriteFile(sdPath, sdContent);
+                else                           sdAppendFile(sdPath, sdContent);
+            }
+        }
+        else if (u.startsWith("SD_EXEC ")) {
+            String sdExecPath = evaluateAllTokens(token.substring(8), vars);
+            sdExecPath.trim();
+            if (!sdExecPath.isEmpty() && sdExecPath[0] == '"' &&
+                sdExecPath[sdExecPath.length()-1] == '"')
+                sdExecPath = sdExecPath.substring(1, sdExecPath.length() - 1);
+            kpsExecFile(sdExecPath, vars);
         }
         else if (u.startsWith("IF ")) {
             String condition = token.substring(3);

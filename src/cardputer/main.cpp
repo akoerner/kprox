@@ -28,6 +28,8 @@
 #include "app_fuzzyprox.h"
 #include "app_sinkprox.h"
 #include "app_totprox.h"
+#include "app_filebrowser.h"
+#include "app_kpsrunner.h"
 #include <M5Cardputer.h>
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -413,6 +415,8 @@ void setup() {
     static Cardputer::AppQRProx      appQRProx;
     static Cardputer::AppSchedProx   appSchedProx;
     static Cardputer::AppTOTProx     appTOTProx;
+    static Cardputer::AppFileBrowser appFileBrowser;
+    static Cardputer::AppKPSRunner   appKPSRunner;
     static Cardputer::AppSettings    appSettings;
 
     // Registration order determines launcher icon index (0 = launcher, 1..N = user apps)
@@ -427,8 +431,10 @@ void setup() {
     Cardputer::uiManager.addApp(&appClock);    // 8
     Cardputer::uiManager.addApp(&appQRProx);   // 9
     Cardputer::uiManager.addApp(&appSchedProx);// 10
-    Cardputer::uiManager.addApp(&appTOTProx);  // 11
-    Cardputer::uiManager.addApp(&appSettings); // 12
+    Cardputer::uiManager.addApp(&appTOTProx);      // 11
+    Cardputer::uiManager.addApp(&appFileBrowser);  // 12
+    Cardputer::uiManager.addApp(&appKPSRunner);    // 13
+    Cardputer::uiManager.addApp(&appSettings); // 14
 
     // Load persisted app order/visibility (12 user apps, indices 1..12)
     loadAppLayout(12);

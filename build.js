@@ -103,6 +103,14 @@ async function build() {
             console.log('ℹ API_REFERENCE.md not found, skipping');
         }
 
+        // Copy KEYPROX_SCRIPT_REFERENCE.md to data/ so it is served via /api/kpsref
+        try {
+            await fs.copyFile('KEYPROX_SCRIPT_REFERENCE.md', path.join(dataDir, 'KEYPROX_SCRIPT_REFERENCE.md'));
+            console.log('✓ KEYPROX_SCRIPT_REFERENCE.md copied to data/');
+        } catch {
+            console.log('ℹ KEYPROX_SCRIPT_REFERENCE.md not found, skipping');
+        }
+
         const originalHtmlSize = (await fs.stat(path.join(webDir, 'index.html'))).size;
         const originalCssSize  = (await fs.stat(path.join(webDir, 'css', 'kprox.css'))).size;
         const originalJsSize   = (await fs.stat(path.join(webDir, 'js', 'kprox.js'))).size;
