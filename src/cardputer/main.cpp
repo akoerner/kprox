@@ -217,6 +217,7 @@ void setup() {
     loadTimingSettings();
     loadLEDSettings();
     loadCsSecuritySettings();
+    loadCsStorageLocation();
     loadHostnameSettings();
     loadDefaultAppSettings();
     loadMTLSSettings();

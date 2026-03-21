@@ -32,7 +32,7 @@ void AppSettings::_drawTopBar(int pageNum) {
     static const char* pageLabels[NUM_PAGES] = {
         "WiFi Settings", "Bluetooth", "USB HID", "API Key",
         "Device Identity", "Sink Config", "HID Timing 1/2", "HID Timing 2/2",
-        "Startup App", "App Layout", "CS Security"
+        "Startup App", "App Layout", "CS Security", "SD Storage"
     };
     disp.drawString(pageLabels[pageNum], 4, 3);
 
@@ -977,7 +977,7 @@ void AppSettings::_handlePage10(KeyInput ki) {
         _page = 9; _toggleSel = 0; _editing = false; _editBuf = ""; _needsRedraw = true; return;
     }
     if (ki.arrowRight && !_editing) {
-        _page = 0; _toggleSel = 0; _editing = false; _editBuf = ""; _needsRedraw = true; return;
+        _page = 11; _toggleSel = 0; _editing = false; _editBuf = ""; _needsRedraw = true; return;
     }
 
     // Navigation works even when locked; editing does not
@@ -1014,6 +1014,135 @@ void AppSettings::_handlePage10(KeyInput ki) {
     }
     if (ki.del && _editBuf.length() > 0) { _editBuf.remove(_editBuf.length()-1); _needsRedraw = true; return; }
     if (ki.ch >= '0' && ki.ch <= '9' && (int)_editBuf.length() < 6) { _editBuf += ki.ch; _needsRedraw = true; }
+}
+
+// ---- Page 11: SD Storage ----
+
+void AppSettings::_drawPage11() {
+    auto& disp = M5Cardputer.Display;
+    disp.fillScreen(SETTINGS_BG);
+    _drawTopBar(11);
+
+    int y = CONTENT_Y;
+    disp.setTextSize(1);
+
+    bool onSd   = (csStorageLocation == "sd");
+    bool sdOk   = sdAvailable();
+
+    // Current location
+    disp.setTextColor(labelColor(), SETTINGS_BG);
+    disp.drawString("CS database location:", 4, y); y += 14;
+
+    // NVS row
+    bool nvsSelected = (_toggleSel == 0);
+    uint16_t nvsBg = nvsSelected ? selBgColor() : (uint16_t)SETTINGS_BG;
+    if (nvsSelected) disp.fillRect(0, y-1, disp.width(), 14, nvsBg);
+    disp.setTextColor(nvsSelected ? TFT_WHITE : labelColor(), nvsBg);
+    String nvsLabel = (!onSd ? "> " : "  ");
+    nvsLabel += "NVS (built-in flash)";
+    disp.drawString(nvsLabel, 4, y); y += 14;
+
+    // SD row
+    bool sdSelected = (_toggleSel == 1);
+    uint16_t sdBg = sdSelected ? selBgColor() : (uint16_t)SETTINGS_BG;
+    if (sdSelected) disp.fillRect(0, y-1, disp.width(), 14, sdBg);
+    uint16_t sdColor = sdOk ? (sdSelected ? (uint16_t)TFT_WHITE : labelColor())
+                             : disp.color565(100, 100, 100);
+    disp.setTextColor(sdColor, sdBg);
+    String sdLabel = (onSd ? "> " : "  ");
+    sdLabel += "SD card";
+    sdLabel += sdOk ? "" : " (not found)";
+    disp.drawString(sdLabel, 4, y); y += 18;
+
+    // Format SD row
+    bool fmtSelected = (_toggleSel == 2);
+    uint16_t fmtBg = fmtSelected ? disp.color565(80, 20, 20) : (uint16_t)SETTINGS_BG;
+    if (fmtSelected) disp.fillRect(0, y-1, disp.width(), 14, fmtBg);
+    uint16_t fmtColor = sdOk ? (fmtSelected ? (uint16_t)TFT_WHITE : disp.color565(220, 80, 80))
+                              : disp.color565(80, 80, 80);
+    disp.setTextColor(fmtColor, fmtBg);
+    disp.drawString("  Format SD card", 4, y); y += 18;
+
+    if (_idSaved) {
+        disp.setTextColor(disp.color565(80, 220, 80), SETTINGS_BG);
+        disp.drawString("Saved.", 4, y);
+    }
+    if (!_editBuf.isEmpty()) {
+        disp.setTextColor(disp.color565(220, 80, 80), SETTINGS_BG);
+        disp.drawString(_editBuf, 4, y);
+    }
+
+    _drawBottomBar("up/dn select  ENTER apply  </> page");
+}
+
+void AppSettings::_handlePage11(KeyInput ki) {
+    if (ki.arrowLeft && !_editing) {
+        _page = 10; _toggleSel = 0; _editing = false; _editBuf = ""; _idSaved = false; _needsRedraw = true; return;
+    }
+    if (ki.arrowRight && !_editing) {
+        _page = 0; _toggleSel = 0; _editing = false; _editBuf = ""; _idSaved = false; _needsRedraw = true; return;
+    }
+
+    if (ki.arrowUp)   { _toggleSel = (_toggleSel - 1 + 3) % 3; _idSaved = false; _editBuf = ""; _needsRedraw = true; return; }
+    if (ki.arrowDown) { _toggleSel = (_toggleSel + 1) % 3;     _idSaved = false; _editBuf = ""; _needsRedraw = true; return; }
+
+    if (!ki.enter) return;
+    _idSaved = false; _editBuf = "";
+
+    if (_toggleSel == 0) {
+        // Set NVS
+        if (csStorageLocation != "nvs") {
+            String oldLoc = csStorageLocation;
+            csStorageLocation = "nvs";
+            if (!credStoreLocked) {
+                if (writeKDBX(credStoreRuntimeKey)) {
+                    if (oldLoc == "sd") sdRemove();
+                    saveCsStorageLocation();
+                    _idSaved = true;
+                } else {
+                    csStorageLocation = oldLoc;
+                    _editBuf = "Write failed";
+                }
+            } else {
+                saveCsStorageLocation();
+                _idSaved = true;
+            }
+        } else {
+            _idSaved = true;
+        }
+    } else if (_toggleSel == 1) {
+        // Set SD
+        if (!sdAvailable()) { _editBuf = "SD not found"; _needsRedraw = true; return; }
+        if (csStorageLocation != "sd") {
+            String oldLoc = csStorageLocation;
+            csStorageLocation = "sd";
+            if (!credStoreLocked) {
+                if (writeKDBX(credStoreRuntimeKey)) {
+                    if (oldLoc == "nvs") { preferences.begin("kprox_db", false); preferences.clear(); preferences.end(); }
+                    saveCsStorageLocation();
+                    _idSaved = true;
+                } else {
+                    csStorageLocation = oldLoc;
+                    _editBuf = "Write failed";
+                }
+            } else {
+                saveCsStorageLocation();
+                _idSaved = true;
+            }
+        } else {
+            _idSaved = true;
+        }
+    } else if (_toggleSel == 2) {
+        // Format SD
+        if (!sdAvailable()) { _editBuf = "SD not found"; _needsRedraw = true; return; }
+        if (sdFormat()) {
+            if (csStorageLocation == "sd") credStoreLock();
+            _idSaved = true;
+        } else {
+            _editBuf = "Format failed";
+        }
+    }
+    _needsRedraw = true;
 }
 
 // ---- AppBase overrides ----
@@ -1064,6 +1193,7 @@ void AppSettings::onUpdate() {
             case 8: _drawPage8(); break;  // Startup App
             case 9: _drawPage9(); break;  // App Layout
             case 10: _drawPage10(); break; // CS Security
+            case 11: _drawPage11(); break; // SD Storage
         }
         _needsRedraw = false;
     }
@@ -1091,6 +1221,7 @@ void AppSettings::onUpdate() {
         case 8: _handlePage8(ki); break;  // Startup App
         case 9: _handlePage9(ki); break;  // App Layout
         case 10: _handlePage10(ki); break; // CS Security
+        case 11: _handlePage11(ki); break; // SD Storage
     }
 }
 

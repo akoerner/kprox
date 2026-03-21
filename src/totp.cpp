@@ -79,110 +79,147 @@ bool totpTimeReady() {
     return time(nullptr) > 1000000000L;
 }
 
-// ---- NVS account store ----
-// Namespace "kprox_totp"
-// Keys: "n" = count, "nm<i>" = name, "sc<i>" = secret,
-//       "dg<i>" = digits, "pd<i>" = period
-// Gate keys: "gate" = CSGateMode byte, "gsec" = gate TOTP secret
+// ---- TOTP account store ----
+// Accounts are stored entirely in the credential store using the label prefix
+// "__totp__:" so that name, secret, digits, and period are all encrypted at rest.
+// Label format: "__totp__:<name>"
+// Value format: "<base32_secret>:<digits>:<period>"
+//
+// Gate settings (gate mode + gate TOTP secret) remain in the "kprox_totp" NVS
+// namespace because they are needed before the credential store can be unlocked.
+//
+// Migration: on first totpListAccounts() call after a successful unlock, any
+// accounts still present in the old NVS keys (nm<i>/sc<i>/dg<i>/pd<i>) are
+// migrated into the credential store and the old keys are erased.
 
-static const char* TOTP_NS = "kprox_totp";
+static const char* TOTP_NS     = "kprox_totp";
+static const char* TOTP_PREFIX = "__totp__:";
 
-void totpInit() {
-    // Nothing to do at runtime; NVS loaded on demand
+void totpInit() {}
+
+static String _totpLabel(const String& name) {
+    return String(TOTP_PREFIX) + name;
+}
+
+static bool _isTotpLabel(const String& label) {
+    return label.startsWith(TOTP_PREFIX);
+}
+
+static String _totpNameFromLabel(const String& label) {
+    return label.substring(strlen(TOTP_PREFIX));
+}
+
+static String _encodeValue(const TOTPAccount& a) {
+    return a.secret + ":" + String(a.digits) + ":" + String(a.period);
+}
+
+static TOTPAccount _decodeValue(const String& name, const String& value) {
+    TOTPAccount a;
+    a.name = name;
+    int c1 = value.indexOf(':');
+    int c2 = (c1 >= 0) ? value.indexOf(':', c1 + 1) : -1;
+    if (c1 > 0) {
+        a.secret = value.substring(0, c1);
+        a.digits = (c2 > c1) ? value.substring(c1 + 1, c2).toInt() : 6;
+        a.period = (c2 > 0) ? value.substring(c2 + 1).toInt() : 30;
+    } else {
+        a.secret = value;
+        a.digits = 6;
+        a.period = 30;
+    }
+    if (a.digits < 6 || a.digits > 8) a.digits = 6;
+    if (a.period < 15 || a.period > 120) a.period = 30;
+    return a;
+}
+
+// Migrate any accounts still stored in the old NVS layout into the credential store.
+static void _migrateNvsAccounts() {
+    preferences.begin(TOTP_NS, true);
+    int n = preferences.getInt("n", 0);
+    preferences.end();
+    if (n <= 0) return;
+
+    preferences.begin(TOTP_NS, false);
+    for (int i = 0; i < n; i++) {
+        String name   = preferences.getString(("nm" + String(i)).c_str(), "");
+        String encSec = preferences.getString(("sc" + String(i)).c_str(), "");
+        int    digits = preferences.getInt(   ("dg" + String(i)).c_str(), 6);
+        int    period = preferences.getInt(   ("pd" + String(i)).c_str(), 30);
+        if (name.isEmpty()) continue;
+
+        String secret = encSec.isEmpty() ? "" : credDecrypt(encSec, credStoreRuntimeKey);
+        if (secret.isEmpty()) continue;
+
+        TOTPAccount a; a.name = name; a.secret = secret; a.digits = digits; a.period = period;
+        credStoreSet(_totpLabel(name), _encodeValue(a));
+
+        preferences.remove(("nm" + String(i)).c_str());
+        preferences.remove(("sc" + String(i)).c_str());
+        preferences.remove(("dg" + String(i)).c_str());
+        preferences.remove(("pd" + String(i)).c_str());
+    }
+    preferences.putInt("n", 0);
+    preferences.end();
 }
 
 int totpCount() {
-    preferences.begin(TOTP_NS, true);
-    int n = preferences.getInt("n", 0);
-    preferences.end();
-    return n;
+    if (credStoreLocked) return 0;
+    _migrateNvsAccounts();
+    int count = 0;
+    for (auto& lbl : credStoreListAllLabels())
+        if (_isTotpLabel(lbl)) count++;
+    return count;
 }
 
 std::vector<TOTPAccount> totpListAccounts() {
-    preferences.begin(TOTP_NS, true);
-    int n = preferences.getInt("n", 0);
+    if (credStoreLocked) return {};
+    _migrateNvsAccounts();
     std::vector<TOTPAccount> out;
-    for (int i = 0; i < n; i++) {
-        TOTPAccount a;
-        a.name   = preferences.getString(("nm" + String(i)).c_str(), "");
-        a.digits = preferences.getInt(   ("dg" + String(i)).c_str(), 6);
-        a.period = preferences.getInt(   ("pd" + String(i)).c_str(), 30);
-        // Only decrypt secret when the credential store is unlocked
-        if (!credStoreLocked && !credStoreRuntimeKey.isEmpty()) {
-            String enc = preferences.getString(("sc" + String(i)).c_str(), "");
-            a.secret = enc.isEmpty() ? "" : credDecrypt(enc, credStoreRuntimeKey);
-        }
-        // secret left empty when locked — callers check for empty
-        if (!a.name.isEmpty()) out.push_back(a);
+    for (auto& lbl : credStoreListAllLabels()) {
+        if (!_isTotpLabel(lbl)) continue;
+        String name  = _totpNameFromLabel(lbl);
+        String value = credStoreGet(lbl);
+        if (value.isEmpty()) continue;
+        out.push_back(_decodeValue(name, value));
     }
-    preferences.end();
     return out;
 }
 
 bool totpAddAccount(const TOTPAccount& acct) {
     if (acct.name.isEmpty() || acct.secret.isEmpty()) return false;
     if (base32Decode(acct.secret).size() < 10) return false;
-
-    // Encrypt the secret before storing. If the store is locked we cannot
-    // encrypt so refuse to add until the store is unlocked.
-    if (credStoreLocked || credStoreRuntimeKey.isEmpty()) return false;
-    String encSecret = credEncrypt(acct.secret, credStoreRuntimeKey);
-    if (encSecret.isEmpty()) return false;
-
-    preferences.begin(TOTP_NS, false);
-    int n = preferences.getInt("n", 0);
-    for (int i = 0; i < n; i++) {
-        if (preferences.getString(("nm" + String(i)).c_str(), "").equalsIgnoreCase(acct.name)) {
-            preferences.putString(("sc" + String(i)).c_str(), encSecret);
-            preferences.putInt(   ("dg" + String(i)).c_str(), acct.digits);
-            preferences.putInt(   ("pd" + String(i)).c_str(), acct.period);
-            preferences.end();
-            return true;
-        }
-    }
-    preferences.putString(("nm" + String(n)).c_str(), acct.name);
-    preferences.putString(("sc" + String(n)).c_str(), encSecret);
-    preferences.putInt(   ("dg" + String(n)).c_str(), acct.digits);
-    preferences.putInt(   ("pd" + String(n)).c_str(), acct.period);
-    preferences.putInt("n", n + 1);
-    preferences.end();
-    return true;
+    if (credStoreLocked) return false;
+    _migrateNvsAccounts();
+    return credStoreSet(_totpLabel(acct.name), _encodeValue(acct));
 }
 
 bool totpDeleteAccount(const String& name) {
-    auto accounts = totpListAccounts();
-    int found = -1;
-    for (int i = 0; i < (int)accounts.size(); i++) {
-        if (accounts[i].name.equalsIgnoreCase(name)) { found = i; break; }
-    }
-    if (found < 0) return false;
-    accounts.erase(accounts.begin() + found);
-
-    preferences.begin(TOTP_NS, false);
-    // Preserve gate settings — only rewrite account keys
-    preferences.putInt("n", (int)accounts.size());
-    for (int i = 0; i < (int)accounts.size(); i++) {
-        preferences.putString(("nm" + String(i)).c_str(), accounts[i].name);
-        preferences.putString(("sc" + String(i)).c_str(), accounts[i].secret);
-        preferences.putInt(   ("dg" + String(i)).c_str(), accounts[i].digits);
-        preferences.putInt(   ("pd" + String(i)).c_str(), accounts[i].period);
-    }
-    // Clear trailing stale key
-    preferences.remove(("nm" + String(accounts.size())).c_str());
-    preferences.remove(("sc" + String(accounts.size())).c_str());
-    preferences.remove(("dg" + String(accounts.size())).c_str());
-    preferences.remove(("pd" + String(accounts.size())).c_str());
-    preferences.end();
-    return true;
+    if (credStoreLocked) return false;
+    _migrateNvsAccounts();
+    return credStoreDelete(_totpLabel(name));
 }
 
 void totpWipe() {
+    // Remove all __totp__: entries from the credential store
+    if (!credStoreLocked) {
+        for (auto& lbl : credStoreListAllLabels())
+            if (_isTotpLabel(lbl)) credStoreDelete(lbl);
+    }
+    // Also clear legacy NVS entries
     preferences.begin(TOTP_NS, false);
-    preferences.clear();
+    int n = preferences.getInt("n", 0);
+    for (int i = 0; i < n; i++) {
+        preferences.remove(("nm" + String(i)).c_str());
+        preferences.remove(("sc" + String(i)).c_str());
+        preferences.remove(("dg" + String(i)).c_str());
+        preferences.remove(("pd" + String(i)).c_str());
+    }
+    preferences.putInt("n", 0);
     preferences.end();
 }
 
 int32_t totpGetCode(const String& name) {
+    if (credStoreLocked) return -1;
     auto accounts = totpListAccounts();
     for (auto& a : accounts) {
         if (a.name.equalsIgnoreCase(name)) {

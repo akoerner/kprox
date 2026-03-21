@@ -1,5 +1,6 @@
 #include "token_parser.h"
 #include "hid.h"
+#include "registers.h"
 #include "connection.h"
 #include "keymap.h"
 #include "storage.h"
@@ -378,9 +379,21 @@ static String evaluateAllTokens(String input, std::map<String, String>& vars) {
                 resolved    = true;
             }
         } else if (upperToken.startsWith("CREDSTORE ")) {
-            String label = token.substring(10);
-            label.trim();
-            replacement = credStoreLocked ? "" : credStoreGet(label);
+            String rest = token.substring(10);
+            rest.trim();
+            CredField field = CredField::PASSWORD;
+            String label    = rest;
+            // Optional first word selects field: password/username/notes
+            int sp = rest.indexOf(' ');
+            if (sp > 0) {
+                String first = rest.substring(0, sp);
+                first.toLowerCase();
+                if (first == "username") { field = CredField::USERNAME; label = rest.substring(sp + 1); label.trim(); }
+                else if (first == "notes") { field = CredField::NOTES;    label = rest.substring(sp + 1); label.trim(); }
+                else if (first == "password") { field = CredField::PASSWORD; label = rest.substring(sp + 1); label.trim(); }
+                // else treat the whole rest as the label, default field = PASSWORD
+            }
+            replacement = credStoreLocked ? "" : credStoreGet(label, field);
             resolved    = true;
         } else if (upperToken == "KPROX_IP") {
 #ifdef BOARD_M5STACK_CARDPUTER
@@ -456,6 +469,21 @@ static bool isKeyToken(const String& upper) {
             (upper.startsWith("F") && upper.length() <= 3 && upper.substring(1).toInt() >= 13 && upper.substring(1).toInt() <= 24));
 }
 
+static int resolveRegisterArg(const String& arg) {
+    bool allDigits = !arg.isEmpty();
+    for (char c : arg) { if (!isDigit(c)) { allDigits = false; break; } }
+    if (allDigits) {
+        int idx = arg.toInt() - 1;
+        return (idx >= 0 && (size_t)idx < registers.size()) ? idx : -1;
+    }
+    String argUp = arg; argUp.toUpperCase();
+    for (int i = 0; i < (int)registerNames.size(); i++) {
+        String n = registerNames[i]; n.toUpperCase();
+        if (n == argUp) return i;
+    }
+    return -1;
+}
+
 static bool isControlToken(const String& token) {
     String u = token;
     u.toUpperCase();
@@ -477,7 +505,8 @@ static bool isControlToken(const String& token) {
             u.startsWith("MOUSERELEASE")|| u.startsWith("MOUSEDOUBLECLICK") ||
             u.startsWith("LOOP")        || u.startsWith("FOR ")         || u.startsWith("WHILE ")      ||
             u.startsWith("BREAK ")      || u.startsWith("SCHEDULE ")    ||
-            u.startsWith("SET ")        || u.startsWith("IF ")          || u.startsWith("KEYMAP"));
+            u.startsWith("SET ")        || u.startsWith("IF ")          || u.startsWith("KEYMAP") ||
+            u.startsWith("SET_ACTIVE_REGISTER ") || u.startsWith("PLAY_REGISTER "));
 }
 
 // ---- Key token resolution ----
@@ -890,6 +919,18 @@ void parseAndSendText(const String& text, std::map<String, String>& vars) {
             if (!id.isEmpty()) {
                 if (keymapLoad(id)) keymapSaveActive();
             }
+        }
+        else if (u.startsWith("SET_ACTIVE_REGISTER ")) {
+            String arg = evaluateAllTokens(token.substring(20), vars);
+            arg.trim();
+            int idx = resolveRegisterArg(arg);
+            if (idx >= 0) { activeRegister = idx; saveActiveRegister(); }
+        }
+        else if (u.startsWith("PLAY_REGISTER ")) {
+            String arg = evaluateAllTokens(token.substring(14), vars);
+            arg.trim();
+            int idx = resolveRegisterArg(arg);
+            if (idx >= 0) playRegister(idx);
         }
         else if (u.startsWith("IF ")) {
             String condition = token.substring(3);

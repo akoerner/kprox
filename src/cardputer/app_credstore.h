@@ -50,10 +50,12 @@ private:
     // When _credListIdx >= 0 the user is browsing existing labels.
     // Value is NEVER pre-filled from the store; user must retype it.
     // Delete mode: _deletePrompted=true shows Y/N confirmation.
-    enum CredField { CF_LABEL = 0, CF_VALUE = 1 };
-    CredField _credField      = CF_LABEL;
+    enum CredEditField { CEF_LABEL = 0, CEF_PASSWORD = 1, CEF_USERNAME = 2, CEF_NOTES = 3, CEF_COUNT = 4 };
+    CredEditField _credField      = CEF_LABEL;
     String    _credLabel;
-    String    _credValue;
+    String    _credPassword;
+    String    _credUsername;
+    String    _credNotes;
     String    _credStatus;
     bool      _credStatusOk  = false;
     int       _credListIdx   = -1;

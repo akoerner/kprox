@@ -183,6 +183,9 @@ extern int           csAutoLockSecs;       // 0 = disabled
 extern int           csAutoWipeAttempts;   // 0 = disabled
 extern unsigned long credStoreLastActivity; // millis() of last HID output or button press
 
+// Credential store backend: "nvs" (default) or "sd"
+extern String csStorageLocation;
+
 // ---- Runtime-configurable HID timing (ms) ----
 extern int g_keyPressDelay;
 extern int g_keyReleaseDelay;

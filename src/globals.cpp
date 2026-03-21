@@ -24,5 +24,7 @@ int           csAutoLockSecs        = 0;
 int           csAutoWipeAttempts    = 0;
 unsigned long credStoreLastActivity = 0;
 
+String csStorageLocation = "nvs";
+
 // ---- Sink ----
 int maxSinkSize = 0; // 0 = unlimited

@@ -2309,28 +2309,58 @@ async function csRefresh() {
 
         // Failed attempts badge — update both credstore tab and global sidebar
         _updateCsFailedBadge(data.failed_attempts || 0, data.auto_wipe_at || 0);
+        // Storage location badges
+        const locBadge  = document.getElementById('csStorageLocationBadge');
+        const sdBadge   = document.getElementById('csSdAvailableBadge');
+        const fmtBtn    = document.getElementById('csSdFormatBtn');
+        if (locBadge) {
+            const loc = data.storage_location || 'nvs';
+            locBadge.textContent  = `Location: ${loc === 'sd' ? 'SD card' : 'NVS (flash)'}`;
+            locBadge.style.background = loc === 'sd' ? '#0d6efd' : '#6c757d';
+            locBadge.style.color = '#fff';
+        }
+        if (sdBadge) {
+            const avail = data.sd_available;
+            sdBadge.textContent  = avail ? 'SD: available' : 'SD: not found';
+            sdBadge.style.background = avail ? '#198754' : '#6c757d';
+            sdBadge.style.color = '#fff';
+        }
+        if (fmtBtn) fmtBtn.style.display = data.sd_available ? '' : 'none';
+
         if (list) {
             if (data.locked) {
                 list.innerHTML = '<em style="color:#6c757d;">Unlock the store to view credentials.</em>';
             } else if (!data.labels || data.labels.length === 0) {
                 list.innerHTML = '<em style="color:#6c757d;">No credentials stored yet.</em>';
             } else {
+                const creds = data.credentials || data.labels.map(l => ({ label: l }));
                 list.innerHTML = `
                     <table style="width:100%;border-collapse:collapse;font-size:12px;">
                         <thead><tr style="background:#f8f9fa;border-bottom:2px solid #dee2e6;">
                             <th style="padding:6px 8px;text-align:left;">Label</th>
-                            <th style="padding:6px 8px;text-align:left;color:#6c757d;">Token Tag</th>
+                            <th style="padding:6px 8px;text-align:left;color:#6c757d;">Fields</th>
                             <th style="padding:6px 8px;width:130px;"></th>
                         </tr></thead>
-                        <tbody>${data.labels.map((lbl, li) => `
+                        <tbody>${creds.map(cr => {
+                            const lbl = typeof cr === 'string' ? cr : cr.label;
+                            const hasPw   = cr.has_password !== false;
+                            const hasUser = !!cr.has_username;
+                            const hasNote = !!cr.has_notes;
+                            const badges = [
+                                hasPw   ? '<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:#0d6efd;color:#fff;margin-right:3px;">pw</span>' : '',
+                                hasUser ? '<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:#198754;color:#fff;margin-right:3px;">user</span>' : '',
+                                hasNote ? '<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:#6c757d;color:#fff;">note</span>' : '',
+                            ].join('');
+                            return `
                             <tr style="border-bottom:1px solid #dee2e6;">
                                 <td style="padding:6px 8px;font-family:monospace;font-weight:bold;">${escapeHtml(lbl)}</td>
-                                <td style="padding:6px 8px;font-family:monospace;color:#6c757d;font-size:11px;">{CREDSTORE ${escapeHtml(lbl)}}</td>
+                                <td style="padding:6px 8px;">${badges}</td>
                                 <td style="padding:6px 8px;text-align:right;">
                                     <button data-lbl="${escapeHtml(lbl)}" onclick="csPrefillEdit(this.dataset.lbl)" style="padding:3px 10px;font-size:11px;background:#0d6efd;margin-right:4px;">Edit</button>
                                     <button data-lbl="${escapeHtml(lbl)}" onclick="csDeleteCredential(this.dataset.lbl)" style="padding:3px 10px;font-size:11px;background:#dc3545;">Delete</button>
                                 </td>
-                            </tr>`).join('')}
+                            </tr>`;
+                        }).join('')}
                         </tbody>
                     </table>`;
             }
@@ -2399,6 +2429,7 @@ async function csUnlock(e) {
             if (document.getElementById('csKeyInput'))  document.getElementById('csKeyInput').value  = '';
             if (document.getElementById('csTotpInput')) document.getElementById('csTotpInput').value = '';
             await csRefresh();
+            await loadTOTP();
         } else {
             _csStatus('csLockStatus', data.error || 'Invalid credentials.', false);
         }
@@ -2416,40 +2447,83 @@ async function csLock() {
         });
         _csStatus('csLockStatus', 'Locked.', true);
         await csRefresh();
+        await loadTOTP();
     } catch(e) {
         _csStatus('csLockStatus', 'Error: ' + e.message, false);
     }
 }
 
-async function csSetCredential() {
-    const label = document.getElementById('csNewLabel').value.trim();
-    const value = document.getElementById('csNewValue').value;
-    if (!label) { _csStatus('csSetStatus', 'Label is required.', false); return; }
-    if (!value)  { _csStatus('csSetStatus', 'Value is required.', false); return; }
-    const endpoint = getApiEndpoint();
+async function csSetStorageLocation(loc) {
+    if (!isConnected) return;
     try {
-        const resp = await apiFetch(`${endpoint}/api/credstore`, {
-            method: 'POST',
-            body: JSON.stringify({ action: 'set', label, value })
+        const resp = await apiFetch(`${getApiEndpoint()}/api/credstore`, {
+            method: 'POST', body: JSON.stringify({ action: 'set_storage_location', location: loc })
         });
         const data = await resp.json();
         if (resp.ok) {
-            _csStatus('csSetStatus', 'Saved.', true);
-            document.getElementById('csNewLabel').value = '';
-            document.getElementById('csNewValue').value = '';
+            _csStatus('csStorageStatus', `✓ Stored in ${loc === 'sd' ? 'SD card' : 'NVS (flash)'}.`, true);
             await csRefresh();
         } else {
-            _csStatus('csSetStatus', data.error || 'Save failed.', false);
+            _csStatus('csStorageStatus', '✗ ' + (data.error || 'Failed'), false);
+        }
+    } catch(e) { _csStatus('csStorageStatus', '✗ ' + e.message, false); }
+}
+
+async function csSdFormat() {
+    if (!isConnected) return;
+    if (!confirm('Format the SD card database file?\n\nThis removes the credential store from the SD card and cannot be undone.')) return;
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/credstore`, {
+            method: 'POST', body: JSON.stringify({ action: 'format_sd' })
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            _csStatus('csWipeStatus', '✓ SD formatted.', true);
+            await csRefresh();
+        } else {
+            _csStatus('csWipeStatus', '✗ ' + (data.error || 'Failed'), false);
+        }
+    } catch(e) { _csStatus('csWipeStatus', '✗ ' + e.message, false); }
+}
+
+async function csSetCredential() {
+    const label    = document.getElementById('csNewLabel')?.value.trim()    || '';
+    const password = document.getElementById('csNewPassword')?.value        || '';
+    const username = document.getElementById('csNewUsername')?.value.trim() || '';
+    const notes    = document.getElementById('csNewNotes')?.value.trim()    || '';
+    if (!label) { _csStatus('csSetStatus', 'Label is required.', false); return; }
+    const endpoint = getApiEndpoint();
+    try {
+        // Always save password field (even if empty — clears it)
+        const saves = [
+            apiFetch(`${endpoint}/api/credstore`, { method: 'POST', body: JSON.stringify({ action: 'set', label, value: password, field: 'password' }) }),
+        ];
+        if (username) saves.push(apiFetch(`${endpoint}/api/credstore`, { method: 'POST', body: JSON.stringify({ action: 'set', label, value: username, field: 'username' }) }));
+        if (notes)    saves.push(apiFetch(`${endpoint}/api/credstore`, { method: 'POST', body: JSON.stringify({ action: 'set', label, value: notes,    field: 'notes'    }) }));
+        const results = await Promise.all(saves);
+        const allOk = results.every(r => r.ok);
+        if (allOk) {
+            _csStatus('csSetStatus', '✓ Saved.', true);
+            document.getElementById('csNewLabel').value    = '';
+            document.getElementById('csNewPassword').value = '';
+            document.getElementById('csNewUsername').value = '';
+            document.getElementById('csNewNotes').value    = '';
+            await csRefresh();
+        } else {
+            _csStatus('csSetStatus', '✗ Save failed.', false);
         }
     } catch(e) {
-        _csStatus('csSetStatus', 'Error: ' + e.message, false);
+        _csStatus('csSetStatus', '✗ ' + e.message, false);
     }
 }
 
 function csPrefillEdit(label) {
-    document.getElementById('csNewLabel').value = label;
-    document.getElementById('csNewValue').value = '';
-    document.getElementById('csNewValue').focus();
+    document.getElementById('csNewLabel').value    = label;
+    document.getElementById('csNewPassword').value = '';
+    document.getElementById('csNewUsername').value = '';
+    document.getElementById('csNewNotes').value    = '';
+    document.getElementById('csNewPassword').focus();
+    document.getElementById('csNewLabel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 async function csWipe() {
@@ -3143,6 +3217,12 @@ function _renderTOTP(d) {
         gateEl.style.background = d.gate_mode > 0 ? '#6f42c1' : '#343a40';
         gateEl.style.color = '#fff';
     }
+    const csBadge = document.getElementById('totpCsLockBadge');
+    if (csBadge) {
+        csBadge.textContent = d.cs_locked ? 'CS: locked' : 'CS: unlocked';
+        csBadge.style.background = d.cs_locked ? '#dc3545' : '#198754';
+        csBadge.style.color = '#fff';
+    }
     if (modeEl) modeEl.value = String(d.gate_mode ?? 0);
 
     csGateMode = d.gate_mode ?? 0;
@@ -3182,7 +3262,8 @@ function _renderTOTP(d) {
             </div>
             ${d.time_ready ? `<div style="font-size:11px;color:#6c757d;min-width:26px;">${secsLeft}s</div>` : ''}
             <button onclick="totpDeleteAccount('${_esc(a.name)}')"
-                    style="padding:3px 8px;font-size:11px;background:#dc3545;color:#fff;border:none;border-radius:3px;cursor:pointer;">
+                    ${d.cs_locked ? 'disabled title="Unlock the credential store to delete"' : ''}
+                    style="padding:3px 8px;font-size:11px;background:#dc3545;color:#fff;border:none;border-radius:3px;cursor:pointer;${d.cs_locked ? 'opacity:0.4;cursor:not-allowed;' : ''}">
                 Del
             </button>
         </div>`;

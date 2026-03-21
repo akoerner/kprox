@@ -311,3 +311,16 @@ void loadCsSecuritySettings() {
     csAutoWipeAttempts  = preferences.getInt("csAutoWipe", 0);
     preferences.end();
 }
+
+void saveCsStorageLocation() {
+    preferences.begin("kprox", false);
+    preferences.putString("csStoreLoc", csStorageLocation);
+    preferences.end();
+}
+
+void loadCsStorageLocation() {
+    preferences.begin("kprox", false);
+    csStorageLocation = preferences.getString("csStoreLoc", "nvs");
+    preferences.end();
+    if (csStorageLocation != "sd") csStorageLocation = "nvs";
+}

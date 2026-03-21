@@ -21,7 +21,16 @@ void AppTOTProx::_drawTopBar(const char* subtitle) {
     disp.setTextSize(1);
     disp.setTextColor(TFT_WHITE, bc);
     disp.drawString("TOTProx", 4, 3);
-    if (subtitle && *subtitle) {
+
+    if (credStoreLocked) {
+        uint16_t lb = disp.color565(200, 60, 0);
+        const char* lockStr = "LOCKED";
+        int lw = disp.textWidth(lockStr) + 8;
+        int lx = disp.width() - lw - 2;
+        disp.fillRoundRect(lx, 2, lw, TP_BAR_H - 4, 2, lb);
+        disp.setTextColor(TFT_WHITE, lb);
+        disp.drawString(lockStr, lx + 4, 4);
+    } else if (subtitle && *subtitle) {
         int sw = disp.textWidth(subtitle);
         disp.setTextColor(disp.color565(255, 200, 200), bc);
         disp.drawString(subtitle, disp.width() - sw - 4, 3);
@@ -88,11 +97,10 @@ void AppTOTProx::_drawList() {
     disp.drawString(nameDisp, 4, y); y += 14;
 
     // Large 6-digit code
-    if (timeOk && code >= 0) {
+    if (!credStoreLocked && timeOk && code >= 0) {
         char codeBuf[10];
         snprintf(codeBuf, sizeof(codeBuf), "%06" PRId32, code);
 
-        // Space the code digits into two groups of 3 for readability
         char spaced[12];
         snprintf(spaced, sizeof(spaced), "%c%c%c %c%c%c",
                  codeBuf[0], codeBuf[1], codeBuf[2],
@@ -107,12 +115,18 @@ void AppTOTProx::_drawList() {
         disp.drawString(spaced, (disp.width() - tw) / 2, y); y += 32;
     } else {
         disp.setTextSize(1);
-        disp.setTextColor(disp.color565(220, 160, 0), TP_BG);
-        disp.drawString(timeOk ? "Invalid secret" : "No NTP sync", 4, y + 8); y += 28;
+        const char* msg = credStoreLocked ? "Unlock CredStore to view"
+                        : (timeOk        ? "Invalid secret"
+                                         : "No NTP sync");
+        uint16_t msgColor = credStoreLocked
+            ? disp.color565(220, 100, 0)
+            : disp.color565(220, 160, 0);
+        disp.setTextColor(msgColor, TP_BG);
+        disp.drawString(msg, 4, y + 8); y += 28;
     }
 
     // Countdown bar
-    if (timeOk && secsLeft > 0) {
+    if (!credStoreLocked && timeOk && secsLeft > 0) {
         int barW = disp.width() - 8;
         int fillW = (barW * secsLeft) / acct.period;
         uint16_t barColor = (secsLeft <= 5)
@@ -152,7 +166,9 @@ void AppTOTProx::_drawList() {
         disp.drawString(gateStr, 8, y + 2);
     }
 
-    _drawBottomBar("</> acct  ENTER type  N add  D del  G gate  ESC");
+    _drawBottomBar(credStoreLocked
+        ? "</> acct  N add  D del  (unlock CredStore)  ESC"
+        : "</> acct  ENTER type  N add  D del  G gate  ESC");
 }
 
 void AppTOTProx::_handleList(KeyInput ki) {
@@ -171,8 +187,7 @@ void AppTOTProx::_handleList(KeyInput ki) {
         }
 
         if (ki.enter) {
-            // Type current code as HID
-            if (totpTimeReady()) {
+            if (!credStoreLocked && totpTimeReady()) {
                 const TOTPAccount& a = _accounts[_sel];
                 int32_t code = (int32_t)totpCompute(a.secret, time(nullptr), a.period, a.digits);
                 char buf[10]; snprintf(buf, sizeof(buf), "%06" PRId32, code);
@@ -181,7 +196,10 @@ void AppTOTProx::_handleList(KeyInput ki) {
             return;
         }
 
-        if (ki.ch == 'd' || ki.ch == 'D') { _state = ST_CONFIRM_DEL; _needsRedraw = true; return; }
+        if (ki.ch == 'd' || ki.ch == 'D') {
+            if (credStoreLocked) return;
+            _state = ST_CONFIRM_DEL; _needsRedraw = true; return;
+        }
     }
 
     if (ki.ch == 'n' || ki.ch == 'N') {
@@ -559,10 +577,10 @@ void AppTOTProx::onUpdate() {
         _needsRedraw = false;
     }
 
-    // BtnG0 before anyKey gate — type current code
+    // BtnA — type current code (requires credstore unlocked)
     if (_state == ST_LIST && M5Cardputer.BtnA.wasPressed()) {
         uiManager.notifyInteraction();
-        if (!_accounts.empty() && totpTimeReady()) {
+        if (!credStoreLocked && !_accounts.empty() && totpTimeReady()) {
             const TOTPAccount& a = _accounts[_sel];
             int32_t code = (int32_t)totpCompute(a.secret, time(nullptr), a.period, a.digits);
             char buf[10]; snprintf(buf, sizeof(buf), "%06" PRId32, code);

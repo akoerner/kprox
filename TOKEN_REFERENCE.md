@@ -306,7 +306,23 @@ All random output uses `mbedtls_ctr_drbg_random` seeded from the hardware entrop
 
 ## Credential Store — BLE+USB
 
-`{CREDSTORE label}` — inline-substitute a named credential from the encrypted on-device store. Resolves to empty string when the store is locked.
+`{CREDSTORE label}` — resolves to the **password** field of the named credential from the encrypted on-device store. Resolves to an empty string when the store is locked or the credential does not exist.
+
+`{CREDSTORE field label}` — resolves to a specific field of the credential. `field` is case-insensitive and must be one of:
+
+| Field | Description |
+|-------|-------------|
+| `password` | The password / secret value (default when no field is given) |
+| `username` | The username / login name |
+| `notes` | The notes field |
+
+```
+{CREDSTORE github}
+{CREDSTORE password github}
+{CREDSTORE username github}
+{CREDSTORE notes work-vpn}
+{CREDSTORE username corp}{TAB}{CREDSTORE corp}{ENTER}
+```
 
 ---
 
@@ -333,7 +349,24 @@ Requires WiFi + NTP sync to have occurred before use. The code is computed at th
 {SET code {TOTP myaccount}}{code}{ENTER}
 ```
 
-Add accounts via the **TOTProx** cardputer app or the web interface (TOTProx tab). Accounts are stored on-device in the `kprox_totp` NVS namespace, separate from the credential store.
+Add accounts via the **TOTProx** cardputer app or the web interface (TOTProx tab). Account secrets are encrypted on-device using the credential store key (`kprox_totp` NVS namespace).
+
+**The credential store must be unlocked** to view accounts, add accounts, delete accounts, or evaluate `{TOTP name}` tokens. When the store is locked, `{TOTP name}` resolves to an empty string.
+
+---
+
+## Register Control — —
+
+`{SET_ACTIVE_REGISTER arg}` — sets the active register by name/description or 1-based index. The `arg` is matched case-insensitively against register names; if `arg` is a plain integer it is treated as a 1-based index. If no matching register is found the token is a no-op.
+
+`{PLAY_REGISTER arg}` — immediately executes the token string stored in the matched register. Uses the same name/index matching as `SET_ACTIVE_REGISTER`. No-op if no match.
+
+```
+{SET_ACTIVE_REGISTER Endless Mouse Square}
+{SET_ACTIVE_REGISTER 1}
+{PLAY_REGISTER Endless Mouse Square}
+{PLAY_REGISTER 1}
+```
 
 ---
 

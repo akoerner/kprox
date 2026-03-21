@@ -17,7 +17,7 @@ public:
 
 private:
     // 0=WiFi, 1=BT, 2=USB, 3=API Key, 4=Device Identity, 5=Sink Config, 6=Timing 1/2, 7=Timing 2/2, 8=Startup App, 9=App Layout
-    static constexpr int NUM_PAGES = 11;
+    static constexpr int NUM_PAGES = 12;
     int  _page        = 0;
     bool _needsRedraw = true;
 
@@ -63,6 +63,8 @@ private:
     void _handlePage8(KeyInput ki);
     void _handlePage9(KeyInput ki);
     void _handlePage10(KeyInput ki);
+    void _drawPage11();
+    void _handlePage11(KeyInput ki);
     void _connectWifi();
     void _drawInputField(int x, int y, int w, const String& text, bool active, bool masked = false);
     void _drawToggleRow(int y, bool selected, const char* label, bool enabled,

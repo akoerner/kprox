@@ -689,8 +689,17 @@
                         </div>
                         <div style="margin-bottom:18px;padding:12px;border:1px solid #dee2e6;border-radius:6px;">
                             <h4 style="margin:0 0 10px;">Add / Update Credential</h4>
-                            <input type="text" id="csNewLabel" placeholder="Label" autocomplete="off" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-bottom:6px;">
-                            <input type="password" id="csNewValue" placeholder="Value (secret)" autocomplete="new-password" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-bottom:8px;">
+                            <div style="display:grid;gap:6px;margin-bottom:8px;">
+                                <input type="text"     id="csNewLabel"    placeholder="Label"                autocomplete="off"          style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;">
+                                <input type="password" id="csNewPassword" placeholder="Password"             autocomplete="new-password" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;">
+                                <input type="text"     id="csNewUsername" placeholder="Username (optional)"  autocomplete="off"          style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;">
+                                <textarea             id="csNewNotes"    placeholder="Notes (optional)"     autocomplete="off"          rows="2" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;resize:vertical;"></textarea>
+                            </div>
+                            <div style="font-size:11px;color:#6c757d;margin-bottom:8px;">
+                                Use <code>{CREDSTORE label}</code> or <code>{CREDSTORE password label}</code> to type the password,
+                                <code>{CREDSTORE username label}</code> for the username,
+                                <code>{CREDSTORE notes label}</code> for notes.
+                            </div>
                             <button onclick="csSetCredential()" style="width:100%;">Save Credential</button>
                             <div id="csSetStatus" style="font-size:12px;margin-top:6px;"></div>
                         </div>
@@ -716,10 +725,31 @@
                             </form>
                             <div id="csRekeyStatus" style="font-size:12px;margin-top:6px;"></div>
                         </div>
+                        <div style="padding:12px;border:1px solid #dee2e6;border-radius:6px;margin-bottom:16px;">
+                            <h4 style="margin:0 0 8px;">Storage Location</h4>
+                            <p style="font-size:12px;color:#6c757d;margin:0 0 10px;">
+                                The credential store database can be stored in built-in flash (NVS) or on the SD card.
+                                When the store is unlocked, switching location migrates the database automatically.
+                            </p>
+                            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+                                <span id="csStorageLocationBadge" style="font-size:12px;padding:3px 10px;border-radius:4px;background:#343a40;color:#adb5bd;">Location: unknown</span>
+                                <span id="csSdAvailableBadge" style="font-size:12px;padding:3px 10px;border-radius:4px;background:#343a40;color:#adb5bd;">SD: unknown</span>
+                            </div>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+                                <button onclick="csSetStorageLocation('nvs')">Use NVS (flash)</button>
+                                <button onclick="csSetStorageLocation('sd')">Use SD Card</button>
+                            </div>
+                            <div id="csStorageStatus" style="font-size:12px;margin-top:4px;"></div>
+                        </div>
                         <div style="padding:12px;border:1px solid #dc3545;border-radius:6px;background:#fff5f5;">
                             <h4 style="margin:0 0 8px;color:#dc3545;">Danger Zone</h4>
-                            <button onclick="csWipe()" style="width:100%;background:#dc3545;color:#fff;">Wipe Credential Store</button>
-                            <div style="font-size:11px;color:#6c757d;margin-top:5px;">Deletes all credentials and the key check. Cannot be undone.</div>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+                                <button onclick="csWipe()" style="background:#dc3545;color:#fff;">Wipe Credential Store</button>
+                                <button onclick="csSdFormat()" id="csSdFormatBtn" style="background:#dc3545;color:#fff;">Format SD Card</button>
+                            </div>
+                            <div style="font-size:11px;color:#6c757d;margin-top:5px;">
+                                Wipe deletes all credentials and the key check. Format erases the SD card database file. Both cannot be undone.
+                            </div>
                             <div id="csWipeStatus" style="font-size:12px;margin-top:6px;"></div>
                         </div>
                     </div>
@@ -735,6 +765,7 @@
                         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;">
                             <span id="totpTimeStatus" style="font-size:12px;padding:3px 10px;border-radius:4px;background:#343a40;color:#adb5bd;">Time: unknown</span>
                             <span id="totpGateStatus" style="font-size:12px;padding:3px 10px;border-radius:4px;background:#343a40;color:#adb5bd;">Gate: off</span>
+                            <span id="totpCsLockBadge" style="font-size:12px;padding:3px 10px;border-radius:4px;background:#343a40;color:#adb5bd;">CS: unknown</span>
                             <button onclick="loadTOTP()" style="padding:3px 12px;font-size:12px;background:#6c757d;">Refresh</button>
                         </div>
 

@@ -104,9 +104,20 @@ void handleOptions() {
     server.client().stop();
 }
 
+static constexpr const char* SINK_FILE = "/sink.txt";
+
 void handleFileRead(String path) {
     addCorsHeaders();
     if (path.endsWith("/")) path += "index.html";
+
+    // Block internal data files from being served directly
+    if (path.equalsIgnoreCase(SINK_FILE) ||
+        path.equalsIgnoreCase("/sink.txt") ||
+        path.equalsIgnoreCase("/kprox.kdbx")) {
+        server.send(404, "text/plain", "404: Not Found");
+        server.client().stop();
+        return;
+    }
 
     String ct = "text/plain";
     if      (path.endsWith(".html")) ct = "text/html";
@@ -160,6 +171,14 @@ void handleNotFound() {
     server.sendHeader("Connection", "close");
     String path = server.uri();
     if (path == "/api/status") { handleApiStatus(); return; }
+    // Never serve internal data files via the static file fallback
+    if (path.equalsIgnoreCase(SINK_FILE) ||
+        path.equalsIgnoreCase("/sink.txt") ||
+        path.equalsIgnoreCase("/kprox.kdbx")) {
+        server.send(404, "text/plain", "404: Not Found");
+        server.client().stop();
+        return;
+    }
     if (SPIFFS.exists(path.endsWith("/") ? path + "index.html" : path)) {
         handleFileRead(path);
         return;
@@ -168,7 +187,6 @@ void handleNotFound() {
     server.client().stop();
 }
 
-static constexpr const char* SINK_FILE = "/sink.txt";
 
 static size_t sinkSize() {
     if (!SPIFFS.exists(SINK_FILE)) return 0;
@@ -805,6 +823,8 @@ void handleSettings() {
         doc["cs"]["autoLockSecs"]    = csAutoLockSecs;
         doc["cs"]["autoWipeAttempts"]= csAutoWipeAttempts;
         doc["cs"]["failedAttempts"]  = csGetFailedAttempts();
+        doc["cs"]["storageLocation"] = csStorageLocation;
+        doc["cs"]["sdAvailable"]     = sdAvailable();
         doc["csAutoLockSecs"]        = csAutoLockSecs;
         doc["csAutoWipeAttempts"]    = csAutoWipeAttempts;
         doc["csFailedAttempts"]      = csGetFailedAttempts();
@@ -1482,10 +1502,14 @@ void handleCredStore() {
         doc["locked"] = credStoreLocked;
         doc["count"]  = credStoreCount();
         {
-            preferences.begin("kprox_db", true);
-            bool hasDb = preferences.getInt("cs_db_n", 0) > 0;
-            preferences.end();
-            doc["has_db"] = hasDb;
+            bool hasDb = (csStorageLocation == "sd")
+                ? sdExists()
+                : ([]{ preferences.begin("kprox_db", true);
+                       bool h = preferences.getInt("cs_db_n", 0) > 0;
+                       preferences.end(); return h; })();
+            doc["has_db"]           = hasDb;
+            doc["storage_location"] = csStorageLocation;
+            doc["sd_available"]     = sdAvailable();
         }
         doc["failed_attempts"]  = csGetFailedAttempts();
         doc["auto_lock_secs"]   = csAutoLockSecs;
@@ -1497,8 +1521,17 @@ void handleCredStore() {
             doc["lock_in_secs"] = -1;
         }
         if (!credStoreLocked) {
-            JsonArray arr = doc["labels"].to<JsonArray>();
-            for (auto& lbl : credStoreListLabels()) arr.add(lbl);
+            JsonArray arr = doc["credentials"].to<JsonArray>();
+            for (auto& lbl : credStoreListLabels()) {
+                JsonObject entry = arr.add<JsonObject>();
+                entry["label"]        = lbl;
+                entry["has_password"] = !credStoreGet(lbl, CredField::PASSWORD).isEmpty();
+                entry["has_username"] = !credStoreGet(lbl, CredField::USERNAME).isEmpty();
+                entry["has_notes"]    = !credStoreGet(lbl, CredField::NOTES).isEmpty();
+            }
+            // Keep legacy "labels" array for backwards compat
+            JsonArray lblArr = doc["labels"].to<JsonArray>();
+            for (auto& lbl : credStoreListLabels()) lblArr.add(lbl);
         }
         String resp; serializeJson(doc, resp);
         sendEncrypted(200, resp);
@@ -1555,10 +1588,16 @@ void handleCredStore() {
             if (credStoreLocked) {
                 sendEncrypted(403, "{\"error\":\"Store is locked\"}");
             } else {
-                String label = doc["label"] | "";
-                String value = credStoreGet(label);
+                String label     = doc["label"] | "";
+                String fieldStr  = doc["field"] | "password";
+                fieldStr.toLowerCase();
+                CredField field  = fieldStr == "username" ? CredField::USERNAME
+                                 : fieldStr == "notes"    ? CredField::NOTES
+                                 : CredField::PASSWORD;
+                String value = credStoreGet(label, field);
                 JsonDocument r;
                 r["label"] = label;
+                r["field"] = fieldStr;
                 r["found"] = credStoreLabelExists(label);
                 r["value"] = value;
                 String resp; serializeJson(r, resp);
@@ -1569,13 +1608,18 @@ void handleCredStore() {
             if (credStoreLocked) {
                 sendEncrypted(403, "{\"error\":\"Store is locked\"}");
             } else {
-                String label = doc["label"] | "";
-                String value = doc["value"] | "";
+                String label    = doc["label"] | "";
+                String value    = doc["value"] | "";
+                String fieldStr = doc["field"] | "password";
+                fieldStr.toLowerCase();
+                CredField field = fieldStr == "username" ? CredField::USERNAME
+                                : fieldStr == "notes"    ? CredField::NOTES
+                                : CredField::PASSWORD;
                 if (label.isEmpty()) {
                     server.send(400, "application/json", "{\"error\":\"Missing label\"}");
                     server.client().stop(); requestComplete(); return;
                 }
-                credStoreSet(label, value);
+                credStoreSet(label, value, field);
                 sendEncrypted(200, "{\"status\":\"ok\"}");
             }
 
@@ -1590,6 +1634,43 @@ void handleCredStore() {
 
         } else if (action == "wipe") {
             credStoreWipe();
+            sendEncrypted(200, "{\"status\":\"ok\"}");
+
+        } else if (action == "set_storage_location") {
+            String loc = doc["location"] | "nvs";
+            if (loc != "sd") loc = "nvs";
+            if (loc != csStorageLocation) {
+                if (loc == "sd" && !sdAvailable()) {
+                    sendEncrypted(503, "{\"error\":\"SD card not available\"}");
+                    server.client().stop(); requestComplete(); return;
+                }
+                if (!credStoreLocked) {
+                    String oldLoc = csStorageLocation;
+                    csStorageLocation = loc;
+                    if (!writeKDBX(credStoreRuntimeKey)) {
+                        csStorageLocation = oldLoc;
+                        sendEncrypted(500, "{\"error\":\"Migration write failed\"}");
+                        server.client().stop(); requestComplete(); return;
+                    }
+                    if (oldLoc == "sd") sdRemove();
+                    else { preferences.begin("kprox_db", false); preferences.clear(); preferences.end(); }
+                } else {
+                    csStorageLocation = loc;
+                }
+                saveCsStorageLocation();
+            }
+            sendEncrypted(200, "{\"status\":\"ok\"}");
+
+        } else if (action == "format_sd") {
+            if (!sdAvailable()) {
+                sendEncrypted(503, "{\"error\":\"SD card not available\"}");
+                server.client().stop(); requestComplete(); return;
+            }
+            if (!sdFormat()) {
+                sendEncrypted(500, "{\"error\":\"SD format failed\"}");
+                server.client().stop(); requestComplete(); return;
+            }
+            if (csStorageLocation == "sd") credStoreLock();
             sendEncrypted(200, "{\"status\":\"ok\"}");
 
         } else {
@@ -1746,25 +1827,26 @@ void handleTOTP() {
     if (!checkApiKey()) return;
 
     if (server.method() == HTTP_GET) {
-        // List accounts + gate config + current codes
         JsonDocument doc;
-        doc["gate_mode"]   = (int)csGateGetMode();
-        doc["time_ready"]  = totpTimeReady();
-        doc["time_epoch"]  = (long)time(nullptr);
-        doc["cs_locked"]   = credStoreLocked;
+        doc["gate_mode"]  = (int)csGateGetMode();
+        doc["time_ready"] = totpTimeReady();
+        doc["time_epoch"] = (long)time(nullptr);
+        doc["cs_locked"]  = credStoreLocked;
 
         JsonArray arr = doc["accounts"].to<JsonArray>();
-        for (auto& a : totpListAccounts()) {
-            JsonObject obj = arr.add<JsonObject>();
-            obj["name"]   = a.name;
-            obj["digits"] = a.digits;
-            obj["period"] = a.period;
-            if (totpTimeReady()) {
-                char buf[8];
-                snprintf(buf, sizeof(buf), "%06" PRId32,
-                         (int32_t)totpCompute(a.secret, time(nullptr), a.period, a.digits));
-                obj["code"] = buf;
-                obj["seconds_remaining"] = totpSecondsRemaining(time(nullptr), a.period);
+        if (!credStoreLocked) {
+            for (auto& a : totpListAccounts()) {
+                JsonObject obj = arr.add<JsonObject>();
+                obj["name"]   = a.name;
+                obj["digits"] = a.digits;
+                obj["period"] = a.period;
+                if (totpTimeReady()) {
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "%06" PRId32,
+                             (int32_t)totpCompute(a.secret, time(nullptr), a.period, a.digits));
+                    obj["code"] = buf;
+                    obj["seconds_remaining"] = totpSecondsRemaining(time(nullptr), a.period);
+                }
             }
         }
         String resp; serializeJson(doc, resp);
@@ -1800,6 +1882,10 @@ void handleTOTP() {
             }
 
         } else if (action == "delete") {
+            if (credStoreLocked) {
+                sendEncrypted(403, "{\"error\":\"Unlock the credential store first — TOTP accounts are encrypted with it\"}");
+                server.client().stop(); requestComplete(); return;
+            }
             String name = doc["name"] | "";
             totpDeleteAccount(name);
             sendEncrypted(200, "{\"status\":\"ok\"}");

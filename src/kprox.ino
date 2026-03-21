@@ -210,6 +210,7 @@ void setup() {
     loadTimingSettings();
     loadLEDSettings();
     loadCsSecuritySettings();
+    loadCsStorageLocation();
     loadHostnameSettings();
     loadMTLSSettings();
     loadKeymapSettings();

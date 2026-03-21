@@ -1,4 +1,5 @@
 #include "credential_store.h"
+#include "storage.h"
 #include "totp.h"
 #include <ArduinoJson.h>
 #include <mbedtls/aes.h>
@@ -6,13 +7,99 @@
 #include <mbedtls/md.h>
 #include <mbedtls/base64.h>
 #include <algorithm>
+#include <SD.h>
+#include <SPI.h>
+
+// M5Cardputer SD card uses a dedicated SPI bus separate from the display.
+// Display (FSPI): SCK=36, MOSI=35, CS=37  — do NOT use for SD.
+// SD (HSPI):      SCK=40, MOSI=14, MISO=39, CS=12
+#ifdef BOARD_M5STACK_CARDPUTER
+static constexpr int SD_CS_PIN   = 12;
+static constexpr int SD_SCK_PIN  = 40;
+static constexpr int SD_MOSI_PIN = 14;
+static constexpr int SD_MISO_PIN = 39;
+#else
+static constexpr int SD_CS_PIN   = SS;
+static constexpr int SD_SCK_PIN  = SCK;
+static constexpr int SD_MOSI_PIN = MOSI;
+static constexpr int SD_MISO_PIN = MISO;
+#endif
+
+static const char* KDBX_SD_PATH = "/kprox.kdbx";
+
+static bool      sdMounted = false;
+static SPIClass  sdSPI(HSPI);
+
+bool sdMount() {
+    if (sdMounted) return true;
+    sdSPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
+    sdMounted = SD.begin(SD_CS_PIN, sdSPI, 4000000);
+    return sdMounted;
+}
+
+void sdUnmount() {
+    if (sdMounted) {
+        SD.end();
+        sdSPI.end();
+        sdMounted = false;
+    }
+}
+
+bool sdWrite(const uint8_t* data, size_t len) {
+    if (!sdMount()) return false;
+    File f = SD.open(KDBX_SD_PATH, FILE_WRITE);
+    if (!f) return false;
+    size_t written = f.write(data, len);
+    f.close();
+    return written == len;
+}
+
+// Caller must free() the returned buffer.
+uint8_t* sdRead(size_t& outLen) {
+    outLen = 0;
+    if (!sdMount()) return nullptr;
+    File f = SD.open(KDBX_SD_PATH, FILE_READ);
+    if (!f) return nullptr;
+    size_t sz = f.size();
+    if (sz == 0) { f.close(); return nullptr; }
+    uint8_t* buf = (uint8_t*)malloc(sz);
+    if (!buf) { f.close(); return nullptr; }
+    size_t got = f.read(buf, sz);
+    f.close();
+    if (got != sz) { free(buf); return nullptr; }
+    outLen = sz;
+    return buf;
+}
+
+bool sdExists() {
+    if (!sdMount()) return false;
+    return SD.exists(KDBX_SD_PATH);
+}
+
+void sdRemove() {
+    if (sdMount()) SD.remove(KDBX_SD_PATH);
+}
+
+bool sdFormat() {
+    // Remount fresh; remove the KDBX file if present.
+    // Full FAT format requires sdmmc/fatfs APIs beyond the Arduino SD library.
+    sdUnmount();
+    sdSPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
+    if (!SD.begin(SD_CS_PIN, sdSPI, 4000000)) return false;
+    sdMounted = true;
+    if (SD.exists(KDBX_SD_PATH)) SD.remove(KDBX_SD_PATH);
+    return true;
+}
+
+bool sdAvailable() {
+    return sdMount();
+}
 
 // ============================================================
 // KeePass KDBX 3.1 credential store
 // ============================================================
-// Storage: NVS namespace "kprox_db" as chunked blobs — survives firmware flash.
-// Key layout: cs_db_n (total byte count) + cs_db_0, cs_db_1, ... (3900-byte chunks)
-// The KDBX file is a standards-compliant KDBX 3.1 file openable by KeePass / KeePassXC.
+// Backend: NVS chunked blobs (default) or SD card file /kprox.kdbx
+// Controlled by csStorageLocation ("nvs" or "sd").
 //
 // All credential metadata (labels, count, values) is inside the AES-256-CBC payload.
 // ============================================================
@@ -368,16 +455,31 @@ static String buildXML(const std::vector<Credential>& creds,
         xml += "<String><Key>Title</Key><Value>";
         xml += xmlEsc(c.label);
         xml += "</Value></String>\n";
-        xml += "<String><Key>UserName</Key><Value></Value></String>\n";
+
+        // UserName
+        {
+            String uname = c.encUsername.isEmpty() ? "" : credDecrypt(c.encUsername, credStoreRuntimeKey);
+            xml += "<String><Key>UserName</Key><Value>";
+            xml += xmlEsc(uname);
+            xml += "</Value></String>\n";
+        }
+
         xml += "<String><Key>Password</Key><Value Protected=\"True\">";
-        String plain = credDecrypt(c.encValue, credStoreRuntimeKey);
+        String plain = credDecrypt(c.encPassword, credStoreRuntimeKey);
         std::vector<uint8_t> plainBytes(plain.length());
         memcpy(plainBytes.data(), plain.c_str(), plain.length());
         salsa20Xor(innerStream, plainBytes.data(), plainBytes.size());
         xml += b64Encode(plainBytes.data(), plainBytes.size());
         xml += "</Value></String>\n";
         xml += "<String><Key>URL</Key><Value></Value></String>\n";
-        xml += "<String><Key>Notes</Key><Value></Value></String>\n";
+
+        // Notes
+        {
+            String notes = c.encNotes.isEmpty() ? "" : credDecrypt(c.encNotes, credStoreRuntimeKey);
+            xml += "<String><Key>Notes</Key><Value>";
+            xml += xmlEsc(notes);
+            xml += "</Value></String>\n";
+        }
         xml += "</Entry>\n";
     }
 
@@ -462,7 +564,7 @@ static std::vector<uint8_t> readHashBlocks(const uint8_t* data, size_t len) {
 }
 
 // Write KDBX to NVS as chunked blobs
-static bool writeKDBX(const String& password) {
+bool writeKDBX(const String& password) {
     // Random material
     uint8_t masterSeed[32], transformSeed[32], encIV[16],
             protStreamKey[32], streamStartBytes[32];
@@ -561,33 +663,36 @@ static bool writeKDBX(const String& password) {
     free(padded);
     feedWatchdog();
 
-    // ---- Write to NVS as chunked blobs (survives firmware flash) ----
-    // Key layout: "cs_db_n" = total byte count, "cs_db_0".."cs_db_N" = 3900-byte chunks
-    static const size_t CHUNK = 3900;
     size_t total = header.size() + paddedLen;
     uint8_t* fullBuf = (uint8_t*)malloc(total);
     if (!fullBuf) { free(encrypted); return false; }
-    memcpy(fullBuf,               header.data(), header.size());
-    memcpy(fullBuf + header.size(), encrypted,   paddedLen);
+    memcpy(fullBuf,                 header.data(), header.size());
+    memcpy(fullBuf + header.size(), encrypted,     paddedLen);
     free(encrypted);
 
-    preferences.begin("kprox_db", false);
-    preferences.putInt("cs_db_n", (int)total);
-    int chunkIdx = 0;
-    for (size_t off = 0; off < total; off += CHUNK, chunkIdx++) {
-        size_t len = std::min(CHUNK, total - off);
-        char key[12]; snprintf(key, sizeof(key), "cs_db_%d", chunkIdx);
-        preferences.putBytes(key, fullBuf + off, len);
+    bool ok = false;
+    if (csStorageLocation == "sd") {
+        ok = sdWrite(fullBuf, total);
+    } else {
+        static const size_t CHUNK = 3900;
+        preferences.begin("kprox_db", false);
+        preferences.putInt("cs_db_n", (int)total);
+        int chunkIdx = 0;
+        for (size_t off = 0; off < total; off += CHUNK, chunkIdx++) {
+            size_t len = std::min(CHUNK, total - off);
+            char key[12]; snprintf(key, sizeof(key), "cs_db_%d", chunkIdx);
+            preferences.putBytes(key, fullBuf + off, len);
+        }
+        while (true) {
+            char key[12]; snprintf(key, sizeof(key), "cs_db_%d", chunkIdx);
+            if (!preferences.isKey(key)) break;
+            preferences.remove(key); chunkIdx++;
+        }
+        preferences.end();
+        ok = true;
     }
-    // Remove any stale extra chunks from a previous (larger) database
-    while (true) {
-        char key[12]; snprintf(key, sizeof(key), "cs_db_%d", chunkIdx);
-        if (!preferences.isKey(key)) break;
-        preferences.remove(key); chunkIdx++;
-    }
-    preferences.end();
     free(fullBuf);
-    return true;
+    return ok;
 }
 
 // ============================================================
@@ -620,8 +725,7 @@ static void parseXML(const String& xml, const String& key,
         String entry = xml.substring(entryStart, entryEnd + 8);
         pos = entryEnd + 8;
 
-        // Extract title and password
-        String label, encValue;
+        String label, encPassword, encUsername, encNotes;
 
         // Walk through <String> elements
         int strPos = 0;
@@ -648,54 +752,66 @@ static void parseXML(const String& xml, const String& key,
                 label = xmlUnescape(vText);
             } else if (k.equalsIgnoreCase("Password")) {
                 if (isProtected && !vText.isEmpty()) {
-                    // Decode base64 then XOR with Salsa20 stream
                     std::vector<uint8_t> raw;
                     b64Decode(vText, raw);
                     salsa20Xor(innerStream, raw.data(), raw.size());
                     String plain;
                     plain.reserve(raw.size());
                     for (uint8_t b : raw) plain += (char)b;
-                    encValue = credEncrypt(plain, key);
+                    encPassword = credEncrypt(plain, key);
                 } else if (!vText.isEmpty()) {
-                    encValue = credEncrypt(xmlUnescape(vText), key);
+                    encPassword = credEncrypt(xmlUnescape(vText), key);
                 }
+            } else if (k.equalsIgnoreCase("UserName") && !vText.isEmpty()) {
+                encUsername = credEncrypt(xmlUnescape(vText), key);
+            } else if (k.equalsIgnoreCase("Notes") && !vText.isEmpty()) {
+                encNotes = credEncrypt(xmlUnescape(vText), key);
             }
         }
 
         if (!label.isEmpty()) {
-            Credential c;
-            c.label    = label;
-            c.encValue = encValue;
-            _creds.push_back(c);
+            Credential cred;
+            cred.label       = label;
+            cred.encPassword = encPassword;
+            cred.encUsername = encUsername;
+            cred.encNotes    = encNotes;
+            _creds.push_back(cred);
         }
     }
 }
 
 static bool readKDBX(const String& password) {
-    // ---- Read from NVS chunked blobs ----
-    preferences.begin("kprox_db", true);
-    int total = preferences.getInt("cs_db_n", 0);
-    preferences.end();
-    if (total <= 0) return false;
+    uint8_t* fbuf = nullptr;
+    size_t fsize  = 0;
 
-    uint8_t* fbuf = (uint8_t*)malloc(total);
-    if (!fbuf) return false;
+    if (csStorageLocation == "sd") {
+        fbuf = sdRead(fsize);
+        if (!fbuf) return false;
+    } else {
+        preferences.begin("kprox_db", true);
+        int total = preferences.getInt("cs_db_n", 0);
+        preferences.end();
+        if (total <= 0) return false;
 
-    static const size_t CHUNK = 3900;
-    preferences.begin("kprox_db", true);
-    int chunkIdx = 0;
-    size_t loaded = 0;
-    while (loaded < (size_t)total) {
-        char key[12]; snprintf(key, sizeof(key), "cs_db_%d", chunkIdx);
-        size_t got = preferences.getBytesLength(key);
-        if (got == 0) break;
-        preferences.getBytes(key, fbuf + loaded, got);
-        loaded += got; chunkIdx++;
+        fbuf = (uint8_t*)malloc(total);
+        if (!fbuf) return false;
+
+        static const size_t CHUNK = 3900;
+        preferences.begin("kprox_db", true);
+        int chunkIdx = 0;
+        size_t loaded = 0;
+        while (loaded < (size_t)total) {
+            char key[12]; snprintf(key, sizeof(key), "cs_db_%d", chunkIdx);
+            size_t got = preferences.getBytesLength(key);
+            if (got == 0) break;
+            preferences.getBytes(key, fbuf + loaded, got);
+            loaded += got; chunkIdx++;
+        }
+        preferences.end();
+
+        if (loaded != (size_t)total) { free(fbuf); return false; }
+        fsize = total;
     }
-    preferences.end();
-
-    if (loaded != (size_t)total) { free(fbuf); return false; }
-    size_t fsize = total;
 
     size_t pos = 0;
     auto readU32 = [&]() -> uint32_t {
@@ -840,10 +956,13 @@ void credStoreInit() {
 }
 
 void credStoreWipe() {
-    preferences.begin("kprox_db", false);
-    preferences.clear();
-    preferences.end();
-    // Also clear old-style NVS keycheck if present
+    if (csStorageLocation == "sd") {
+        sdRemove();
+    } else {
+        preferences.begin("kprox_db", false);
+        preferences.clear();
+        preferences.end();
+    }
     preferences.begin("kprox_cs", false);
     preferences.remove("cs_kc");
     preferences.end();
@@ -901,11 +1020,13 @@ bool credStoreUnlockWithTOTP(const String& key, const String& totpCode) {
 
     bool ok = readKDBX(key);
     if (!ok) {
-        // DB exists but wrong key
+        // DB exists but wrong key — distinguish missing DB from bad key
         {
-            preferences.begin("kprox_db", true);
-            bool hasDb = preferences.getInt("cs_db_n", 0) > 0;
-            preferences.end();
+            bool hasDb = (csStorageLocation == "sd")
+                ? sdExists()
+                : ([]{ preferences.begin("kprox_db", true);
+                       bool h = preferences.getInt("cs_db_n", 0) > 0;
+                       preferences.end(); return h; })();
             if (hasDb) return onFail();
         }
         // First-time: create empty database with this key
@@ -940,7 +1061,11 @@ bool credStoreRekey(const String& oldKey, const String& newKey) {
 }
 
 int credStoreCount() {
-    return credStoreLocked ? 0 : (int)_creds.size();
+    if (credStoreLocked) return 0;
+    int count = 0;
+    for (auto& c : _creds)
+        if (!c.label.startsWith("__totp__:")) count++;
+    return count;
 }
 
 bool credStoreLabelExists(const String& label) {
@@ -952,29 +1077,61 @@ bool credStoreLabelExists(const String& label) {
 std::vector<String> credStoreListLabels() {
     std::vector<String> labels;
     if (!credStoreLocked)
+        for (auto& c : _creds)
+            if (!c.label.startsWith("__totp__:")) labels.push_back(c.label);
+    return labels;
+}
+
+std::vector<String> credStoreListAllLabels() {
+    std::vector<String> labels;
+    if (!credStoreLocked)
         for (auto& c : _creds) labels.push_back(c.label);
     return labels;
 }
 
 String credStoreGet(const String& label) {
+    return credStoreGet(label, CredField::PASSWORD);
+}
+
+String credStoreGet(const String& label, CredField field) {
     if (credStoreLocked) return "";
-    for (auto& c : _creds)
-        if (c.label.equalsIgnoreCase(label))
-            return credDecrypt(c.encValue, credStoreRuntimeKey);
+    for (auto& cr : _creds) {
+        if (!cr.label.equalsIgnoreCase(label)) continue;
+        switch (field) {
+            case CredField::USERNAME: return cr.encUsername.isEmpty() ? "" : credDecrypt(cr.encUsername, credStoreRuntimeKey);
+            case CredField::NOTES:    return cr.encNotes.isEmpty()    ? "" : credDecrypt(cr.encNotes,    credStoreRuntimeKey);
+            default:                  return cr.encPassword.isEmpty() ? "" : credDecrypt(cr.encPassword, credStoreRuntimeKey);
+        }
+    }
     return "";
 }
 
 bool credStoreSet(const String& label, const String& value) {
+    return credStoreSet(label, value, CredField::PASSWORD);
+}
+
+bool credStoreSet(const String& label, const String& value, CredField field) {
     if (credStoreLocked) return false;
-    String enc = credEncrypt(value, credStoreRuntimeKey);
-    for (auto& c : _creds) {
-        if (c.label.equalsIgnoreCase(label)) {
-            c.encValue = enc;
+    String enc = value.isEmpty() ? "" : credEncrypt(value, credStoreRuntimeKey);
+    for (auto& cr : _creds) {
+        if (cr.label.equalsIgnoreCase(label)) {
+            switch (field) {
+                case CredField::USERNAME: cr.encUsername = enc; break;
+                case CredField::NOTES:    cr.encNotes    = enc; break;
+                default:                  cr.encPassword = enc; break;
+            }
             return writeKDBX(credStoreRuntimeKey);
         }
     }
-    Credential c; c.label = label; c.encValue = enc;
-    _creds.push_back(c);
+    // New entry — create with the given field populated
+    Credential cr;
+    cr.label = label;
+    switch (field) {
+        case CredField::USERNAME: cr.encUsername = enc; break;
+        case CredField::NOTES:    cr.encNotes    = enc; break;
+        default:                  cr.encPassword = enc; break;
+    }
+    _creds.push_back(cr);
     return writeKDBX(credStoreRuntimeKey);
 }
 

@@ -84,11 +84,13 @@ void AppCredStore::_drawInputField(int x, int y, int w,
 }
 
 void AppCredStore::_resetCredFields() {
-    _credLabel     = "";
-    _credValue     = "";
+    _credLabel    = "";
+    _credPassword = "";
+    _credUsername = "";
+    _credNotes    = "";
     _credStatus    = "";
     _credStatusOk  = false;
-    _credField     = CF_LABEL;
+    _credField     = CEF_LABEL;
     _credListIdx   = -1;
     _deletePrompted = false;
 }
@@ -371,15 +373,16 @@ void AppCredStore::_drawPage1() {
     int fw = disp.width() - 8;
 
     if (!credStoreLocked) {
-        bool labelActive = (_credField == CF_LABEL);
-        bool valueActive = (_credField == CF_VALUE);
+        bool labelActive = (_credField == CEF_LABEL);
+        bool passActive  = (_credField == CEF_PASSWORD);
+        bool userActive  = (_credField == CEF_USERNAME);
+        bool notesActive = (_credField == CEF_NOTES);
 
         // --- Label field ---
         disp.setTextSize(1);
         disp.setTextColor(labelActive ? TFT_WHITE : disp.color565(160,160,160), CS_BG);
         disp.drawString("Label:", 4, y);
 
-        // Show browse position when cycling through existing labels
         if (labelActive && _credListIdx >= 0) {
             auto labels = credStoreListLabels();
             if (!labels.empty()) {
@@ -391,41 +394,49 @@ void AppCredStore::_drawPage1() {
             }
         }
 
-        // Badge: EXISTS or NEW
-        if (!_credLabel.isEmpty()) {
+        if (!_credLabel.isEmpty() && _credListIdx < 0) {
             bool exists = credStoreLabelExists(_credLabel);
             uint16_t badgeBg = exists ? disp.color565(30,80,120) : disp.color565(20,80,20);
-            const char* badgeStr = exists ? "UPDATE" : "NEW";
+            const char* badgeStr = exists ? "UPD" : "NEW";
             int bw2 = disp.textWidth(badgeStr)+8;
             int bx2 = disp.width()-bw2-4;
-            if (_credListIdx < 0) { // don't overlap nav counter
-                disp.fillRoundRect(bx2, y, bw2, 12, 2, badgeBg);
-                disp.setTextColor(TFT_WHITE, badgeBg);
-                disp.drawString(badgeStr, bx2+4, y+2);
-            }
+            disp.fillRoundRect(bx2, y, bw2, 12, 2, badgeBg);
+            disp.setTextColor(TFT_WHITE, badgeBg);
+            disp.drawString(badgeStr, bx2+4, y+2);
         }
 
         y += 11;
         _drawInputField(4, y, fw, _credLabel, labelActive, false);
-        y += 17;
+        y += 16;
 
-        // --- Value field ---
-        // Value is never pre-filled from the store. When updating, user must retype.
-        disp.setTextColor(valueActive ? TFT_WHITE : disp.color565(160,160,160), CS_BG);
-        disp.drawString("Value:", 4, y);
+        // --- Password field ---
+        disp.setTextColor(passActive ? TFT_WHITE : disp.color565(160,160,160), CS_BG);
+        disp.drawString("Password:", 4, y);
         y += 11;
-        _drawInputField(4, y, fw, _credValue, valueActive, false);
-        y += 17;
+        _drawInputField(4, y, fw, _credPassword, passActive, true);
+        y += 15;
 
-        // Navigation hint on label field
+        // --- Username field ---
+        disp.setTextColor(userActive ? TFT_WHITE : disp.color565(160,160,160), CS_BG);
+        disp.drawString("Username:", 4, y);
+        y += 11;
+        _drawInputField(4, y, fw, _credUsername, userActive, false);
+        y += 15;
+
+        // --- Notes field ---
+        disp.setTextColor(notesActive ? TFT_WHITE : disp.color565(160,160,160), CS_BG);
+        disp.drawString("Notes:", 4, y);
+        y += 11;
+        _drawInputField(4, y, fw, _credNotes, notesActive, false);
+        y += 14;
+
         if (labelActive && credStoreCount() > 0) {
             disp.setTextSize(1);
             disp.setTextColor(disp.color565(90,90,120), CS_BG);
-            disp.drawString("fn+up/dn browse  DEL delete", 4, y);
-            y += 13;
+            disp.drawString("fn+up/dn browse  DEL del", 4, y);
+            y += 12;
         }
 
-        // Status message
         if (_credStatus.length() > 0) {
             disp.setTextColor(_credStatusOk ? TFT_GREEN : disp.color565(220,80,80), CS_BG);
             disp.drawString(_credStatus, 4, y);
@@ -439,7 +450,7 @@ void AppCredStore::_drawPage1() {
     uint16_t bb = disp.color565(16,16,16);
     disp.fillRect(0, disp.height()-CS_BOT_H, disp.width(), CS_BOT_H, bb);
     disp.setTextColor(disp.color565(100,100,100), bb);
-    disp.drawString("TAB switch  ENTER save  DEL delete  </> page", 2, disp.height()-CS_BOT_H+2);
+    disp.drawString("TAB field  ENTER save  DEL delete  </> page", 2, disp.height()-CS_BOT_H+2);
 
     if (_deletePrompted) _drawDeleteConfirm();
 }
@@ -460,7 +471,8 @@ void AppCredStore::_handlePage1(CSRawKey rk) {
         return;
     }
 
-    bool bothEmpty = _credLabel.isEmpty() && _credValue.isEmpty();
+    bool bothEmpty = _credLabel.isEmpty() && _credPassword.isEmpty()
+                  && _credUsername.isEmpty() && _credNotes.isEmpty();
 
     // Page navigation when fields are clear
     if (bothEmpty) {
@@ -479,14 +491,14 @@ void AppCredStore::_handlePage1(CSRawKey rk) {
 
     if (!credStoreLocked) {
         if (rk.tab) {
-            _credField   = (_credField==CF_LABEL) ? CF_VALUE : CF_LABEL;
+            _credField   = (CredEditField)(((int)_credField + 1) % CEF_COUNT);
             _credListIdx = -1;
             _credStatus  = "";
             _needsRedraw = true;
             return;
         }
 
-        if (_credField == CF_LABEL) {
+        if (_credField == CEF_LABEL) {
             // Up/down: cycle through existing labels (never shows values)
             if (rk.up || rk.down) {
                 auto labels = credStoreListLabels();
@@ -496,8 +508,10 @@ void AppCredStore::_handlePage1(CSRawKey rk) {
                         _credListIdx = rk.up ? n-1 : 0;
                     else
                         _credListIdx = rk.up ? (_credListIdx-1+n)%n : (_credListIdx+1)%n;
-                    _credLabel  = labels[_credListIdx];
-                    _credValue  = ""; // never pre-fill the value
+                    _credLabel    = labels[_credListIdx];
+                    _credPassword = "";
+                    _credUsername = "";
+                    _credNotes    = "";
                     _credStatus = "";
                     _needsRedraw = true;
                 }
@@ -518,7 +532,7 @@ void AppCredStore::_handlePage1(CSRawKey rk) {
 
             if (rk.enter) {
                 if (!_credLabel.isEmpty()) {
-                    _credField=CF_VALUE; _credListIdx=-1; _needsRedraw=true;
+                    _credField=CEF_PASSWORD; _credListIdx=-1; _needsRedraw=true;
                 }
                 return;
             }
@@ -528,14 +542,25 @@ void AppCredStore::_handlePage1(CSRawKey rk) {
                 _credListIdx = -1; _credStatus=""; _needsRedraw=true;
             }
 
-        } else { // CF_VALUE
+        } else {
+            // CEF_PASSWORD / CEF_USERNAME / CEF_NOTES
+            String& buf = (_credField==CEF_USERNAME) ? _credUsername
+                        : (_credField==CEF_NOTES)    ? _credNotes
+                        : _credPassword;
+
             if (rk.enter) {
                 if (_credLabel.isEmpty()) {
                     _credStatus="Label required"; _credStatusOk=false; _needsRedraw=true;
                     return;
                 }
+                // Save all non-empty fields; always save password (may be clearing it)
                 bool existed = credStoreLabelExists(_credLabel);
-                if (credStoreSet(_credLabel, _credValue)) {
+                bool ok = credStoreSet(_credLabel, _credPassword, CredField::PASSWORD);
+                if (ok && !_credUsername.isEmpty())
+                    ok = credStoreSet(_credLabel, _credUsername, CredField::USERNAME);
+                if (ok && !_credNotes.isEmpty())
+                    ok = credStoreSet(_credLabel, _credNotes, CredField::NOTES);
+                if (ok) {
                     _credStatus   = existed ? "Updated!" : "Saved!";
                     _credStatusOk = true;
                     _snapCount    = credStoreCount();
@@ -546,12 +571,12 @@ void AppCredStore::_handlePage1(CSRawKey rk) {
                 _needsRedraw=true; return;
             }
 
-            if (rk.del && _credValue.length()>0) {
-                _credValue.remove(_credValue.length()-1);
+            if (rk.del && buf.length()>0) {
+                buf.remove(buf.length()-1);
                 _credStatus=""; _needsRedraw=true; return;
             }
             if (rk.ch) {
-                _credValue+=rk.ch; _credStatus=""; _needsRedraw=true;
+                buf+=rk.ch; _credStatus=""; _needsRedraw=true;
             }
         }
     }
