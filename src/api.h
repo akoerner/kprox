@@ -1,6 +1,7 @@
 #pragma once
 
 #include "globals.h"
+#include <WebSocketsServer.h>
 
 void setupRoutes();
 
@@ -13,6 +14,7 @@ void handleRegisters();
 void handleSettings();
 void handleSendText();
 void handleSendMouse();
+void handleSendMouseWebSocket(uint8_t num, WStype_t type, uint8_t * payload, size_t length);
 void handleSink();
 void handleFlush();
 void handleSinkSize();

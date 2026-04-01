@@ -40,6 +40,7 @@
 #include <M5Cardputer.h>
 #include "nvs_flash.h"
 #include "nvs.h"
+#include <WebSocketsServer.h>
 
 #ifdef BOARD_HAS_USB_HID
 static void usbPreInit() __attribute__((constructor(110)));
@@ -90,6 +91,7 @@ public:
 
 WebServer        server(80);
 WebServer        serverHTTP(443);
+WebSocketsServer  webSocket(81);
 WiFiUDP          udp;
 Preferences      preferences;
 CRGB             leds[NUM_LEDS];
@@ -358,6 +360,8 @@ void setup() {
     if (wifiEnabled) {
         setupRoutes();
         server.begin();
+        webSocket.begin();
+        webSocket.onEvent(handleSendMouseWebSocket);
     }
 
     feedWatchdog();
@@ -462,6 +466,7 @@ void loop() {
     if (wifiEnabled) {
         server.handleClient();
         if (mtlsEnabled) serverHTTP.handleClient();
+        webSocket.loop();
         MDNS_UPDATE();
     }
 

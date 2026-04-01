@@ -20,6 +20,7 @@
 #include <mbedtls/aes.h>
 #include <mbedtls/sha256.h>
 #include <mbedtls/base64.h>
+#include <WebSocketsServer.h>
 // For Cardputer: M5Cardputer must be included before BLE Combo because both define
 // overlapping KEY_* names. M5Cardputer uses #define macros; BLE Combo uses const uint8_t.
 // Including M5Cardputer first then undefing the macros lets BLE Combo declare its consts
@@ -89,6 +90,7 @@ struct MouseBatch {
 // ---- Hardware objects ----
 extern WebServer        server;     // HTTP on 80; TLS terminated externally when mTLS is configured
 extern WebServer        serverHTTP; // reserved for HTTP->HTTPS redirect when mTLS active
+extern WebSocketsServer webSocket;
 extern WiFiUDP          udp;
 extern Preferences      preferences;
 #ifdef BOARD_M5STACK_CARDPUTER

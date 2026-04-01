@@ -32,7 +32,8 @@ let csGateMode = 0; // 0=key-only, 1=key+TOTP, 2=TOTP-only
 let _mouseNonce = null;
 let _mouseNonceFetching = false;
 let _mouseSendInFlight = false;
-let _mouseRafId = null;
+let _mouseIntervalId = null;
+let MOUSE_HZ = 15; // 15 Hz provides usable movement without noticeable lag.
 
 let apiKey = 'kprox1337';
 
@@ -4453,21 +4454,8 @@ async function _flushMouseMovementDirect() {
     trackpadPendingDy = 0;
 
     _mouseSendInFlight = true;
-    const endpoint = getApiEndpoint();
     try {
-        let nonce = _mouseNonce;
-        _mouseNonce = null;
-        if (!nonce) {
-            const nr = await fetch(`${endpoint}/api/nonce`);
-            nonce = (await nr.json()).nonce;
-        }
-        const hmac = hmacSHA256hex(getApiKey(), nonce);
-        const body = encryptBody(JSON.stringify({ x: dx, y: dy }));
-        await fetch(`${endpoint}/send/mouse`, {
-            method: 'POST',
-            headers: { 'X-Auth': hmac, 'Content-Type': 'text/plain', 'X-Encrypted': '1' },
-            body
-        });
+        wsClient.ws.send(JSON.stringify({ x: dx, y: dy }));
     } catch (_) {
         // Restore on error so the movement isn't dropped silently
         trackpadPendingDx += dx;
@@ -4477,14 +4465,13 @@ async function _flushMouseMovementDirect() {
     _prefetchMouseNonce();
 }
 
-// requestAnimationFrame loop -- runs every frame while the finger/pointer is down,
-// draining accumulated deltas as fast as the device can accept them.
-function _mouseRafLoop() {
+// Fixed-rate loop -- fires every 1000/MOUSE_HZ ms while the finger/pointer is down,
+// draining accumulated deltas at a controlled rate.
+function _mouseTickLoop() {
     _flushMouseMovementDirect();
-    if (isTracking) {
-        _mouseRafId = requestAnimationFrame(_mouseRafLoop);
-    } else {
-        _mouseRafId = null;
+    if (!isTracking) {
+        clearInterval(_mouseIntervalId);
+        _mouseIntervalId = null;
         _flushMouseMovementDirect(); // final drain
     }
 }
@@ -4521,9 +4508,8 @@ function initTrackpad() {
         const pos = getClientPos(e);
         lastTrackpadPosition = { x: pos.x, y: pos.y };
         trackpadElement.style.cursor = 'grabbing';
-        _prefetchMouseNonce();
-        if (!_mouseRafId) {
-            _mouseRafId = requestAnimationFrame(_mouseRafLoop);
+        if (!_mouseIntervalId) {
+            _mouseIntervalId = setInterval(_mouseTickLoop, 1000 / MOUSE_HZ);
         }
     }
 
@@ -4562,8 +4548,8 @@ function initTrackpad() {
 function accumulateTrackpadMovement(deltaX, deltaY) {
     trackpadPendingDx += deltaX;
     trackpadPendingDy += deltaY;
-    if (!_mouseRafId) {
-        _mouseRafId = requestAnimationFrame(_mouseRafLoop);
+    if (!_mouseIntervalId) {
+        _mouseIntervalId = setInterval(_mouseTickLoop, 1000 / MOUSE_HZ);
     }
 }
 
@@ -4574,25 +4560,8 @@ async function flushTrackpadBatch() {
 
 async function _sendMouseActionDirect(payload) {
     if (!isConnected) return;
-    const endpoint = getApiEndpoint();
-    try {
-        let nonce = _mouseNonce;
-        _mouseNonce = null;
-        if (!nonce) {
-            const nr = await fetch(`${endpoint}/api/nonce`);
-            nonce = (await nr.json()).nonce;
-        }
-        const hmac = hmacSHA256hex(getApiKey(), nonce);
-        const body = encryptBody(JSON.stringify(payload));
-        await fetch(`${endpoint}/send/mouse`, {
-            method: 'POST',
-            headers: { 'X-Auth': hmac, 'Content-Type': 'text/plain', 'X-Encrypted': '1' },
-            body
-        });
-    } catch (error) {
-        logDebug(`Mouse action error: ${error.message}`, 'error');
-    }
-    _prefetchMouseNonce();
+    wsClient.ws.send(JSON.stringify(payload));
+
 }
 
 async function sendTrackpadClick(button) {
@@ -4665,7 +4634,57 @@ function cacheLogo() {
         })
         .catch(() => {});
 }
-
+class mouseWebSocket {
+  constructor(url) {
+    this.url = url;
+    this.ws = null;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 10; // Stop after 10 retries
+    this.reconnectDelay = 1000; // Start with 1s delay
+  }
+ 
+  connect() {
+    this.ws = new WebSocket(this.url);
+ 
+    // Handle connection open
+    this.ws.onopen = () => {
+      console.log("Connected to WebSocket server");
+      this.reconnectAttempts = 0; // Reset retries on success
+      this.reconnectDelay = 1000; // Reset delay
+    };
+ 
+    // Handle disconnection
+    this.ws.onclose = (event) => {
+      console.log(`Disconnected. Code: ${event.code}, Reason: ${event.reason}`);
+      this.reconnect();
+    };
+ 
+    // Handle errors
+    this.ws.onerror = (error) => {
+      console.error("WebSocket error:", error);
+      this.ws.close(); // Trigger onclose for reconnection
+    };
+  }
+ 
+  reconnect() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error("Max reconnection attempts reached. Stopping.");
+      return;
+    }
+ 
+    this.reconnectAttempts++;
+    console.log(`Reconnecting (attempt ${this.reconnectAttempts})...`);
+ 
+    // Attempt reconnection after delay
+    setTimeout(() => this.connect(), this.reconnectDelay);
+ 
+    // Increase delay (exponential backoff)
+    this.reconnectDelay *= 2;
+  }
+}
+ 
+const wsUrl = getApiEndpoint().replace(/^http/, 'ws') + ':81/';
+const wsClient = new mouseWebSocket(wsUrl); 
 
 async function connect() {
     const endpoint = getApiEndpoint();
@@ -4691,6 +4710,8 @@ async function connect() {
             const errData = await response.json();
             throw new Error(`HTTP ${response.status}: ${errData.error || 'Request failed'}`);
         }
+
+        wsClient.connect();
 
         const data = await response.json();
         logDebug(`rx: ${JSON.stringify(data)}`, 'success');
@@ -5069,12 +5090,9 @@ async function sendMouseMovement() {
     const coordsContainer = document.getElementById('mouseCoords');
     if (!coordsContainer) return;
 
-    requestInProgress = true;
     updateRequestStatus();
     showBusy('mouseBusy');
 
-    const responseBox = document.getElementById('mouseResponse');
-    const endpoint = getApiEndpoint();
     const coords = [];
 
     let i = 0;
@@ -5089,27 +5107,7 @@ async function sendMouseMovement() {
         i++;
     }
 
-    try {
-        const response = await apiFetch(`${endpoint}/send/mouse`, {
-            method: 'POST',
-            body: JSON.stringify(coords)
-        });
-
-        const result = await response.text();
-        if (responseBox) {
-            responseBox.textContent = `Response: ${result}`;
-        }
-        logDebug(`Mouse movement sent: ${JSON.stringify(coords)}`, 'success');
-    } catch (error) {
-        if (responseBox) {
-            responseBox.textContent = `Error: ${error.message}`;
-        }
-        logDebug(`Mouse movement failed: ${error.message}`, 'error');
-    } finally {
-        requestInProgress = false;
-        updateRequestStatus();
-        hideBusy('mouseBusy');
-    }
+    wsClient.ws.send(JSON.stringify(coords));
 }
 
 async function updateDeviceSettings() {

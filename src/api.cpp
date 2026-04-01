@@ -506,6 +506,27 @@ void handleSendMouse() {
     requestComplete();
 }
 
+void handleSendMouseWebSocket(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
+    if (type != WStype_TEXT) return;
+
+    JsonDocument doc;
+    deserializeJson(doc, payload, length);
+
+    if (doc.containsKey("x") || doc.containsKey("y")) {
+        int dx = doc["x"] | 0, dy = doc["y"] | 0;
+        if (dx || dy) sendMouseMovement(dx, dy);
+    }
+
+    if (doc.containsKey("action")) {
+        String action = doc["action"].as<String>();
+        int button = doc["button"] | MOUSE_LEFT;
+        if      (action == "click")   sendMouseClick(button);
+        else if (action == "double")  sendMouseDoubleClick(button);
+        else if (action == "press")   sendMousePress(button);
+        else if (action == "release") sendMouseRelease(button);
+    }
+}
+
 // ---- Sink ----
 
 // POST /api/sink — no HMAC required; accepts:
