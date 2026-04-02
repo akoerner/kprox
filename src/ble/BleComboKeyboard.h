@@ -120,6 +120,7 @@ private:
   BleKeyReport   _keyReport;
   MediaKeyReport _mediaKeyReport;
   SystemKeyReport _systemKeyReport;
+  bool _begun;
   static void taskServer(void* pvParameter);
 
 public:

@@ -204,15 +204,24 @@ BleComboKeyboard::BleComboKeyboard(std::string deviceName, std::string deviceMan
   this->inputExtKeys     = nullptr;
   this->inputMouse       = nullptr;
   this->_systemKeyReport = 0;
+  this->_begun           = false;
 }
 
 void BleComboKeyboard::begin(void)
 {
+  if (_begun) {
+    BLEDevice::startAdvertising();
+    return;
+  }
+  _begun = true;
   xTaskCreate(this->taskServer, "server", 20000, (void *)this, 5, NULL);
 }
 
 void BleComboKeyboard::end(void)
 {
+  if (_begun) {
+    BLEDevice::getAdvertising()->stop();
+  }
 }
 
 bool BleComboKeyboard::isConnected(void) {

@@ -133,7 +133,7 @@ void AppSettings::_drawPage1() {
     _drawTopBar(1);
 
     // 4 rows: BT enable, BT Keyboard, BT Mouse, BT Intl Keys
-    bool btConn = bluetoothInitialized && BLE_KEYBOARD_VALID && BLE_KEYBOARD.isConnected();
+    bool btConn = bluetoothEnabled && BLE_KEYBOARD_VALID && BLE_KEYBOARD.isConnected();
     const char* connStr = btConn ? "connected" : (bluetoothEnabled ? "no peer" : "");
     uint16_t connCol = btConn ? disp.color565(80,220,80) : disp.color565(200,160,0);
 
@@ -150,12 +150,6 @@ void AppSettings::_drawPage1() {
                        i == 0 ? connStr : nullptr, connCol);
     }
 
-    if (_rebootNote) {
-        disp.setTextSize(1);
-        disp.setTextColor(disp.color565(200,160,0), SETTINGS_BG);
-        disp.drawString("Reboot to apply BT changes", 4, CONTENT_Y + 4*22 + 4);
-    }
-
     _drawBottomBar("up/dn  ENTER toggle  C reconnect  </> page  ESC");
 }
 
@@ -170,7 +164,7 @@ void AppSettings::_handlePage1(KeyInput ki) {
         switch (_toggleSel) {
             case 0:
                 if (bluetoothEnabled) disableBluetooth(); else enableBluetooth();
-                _rebootNote = true; break;
+                break;
             case 1:
                 bleKeyboardEnabled = !bleKeyboardEnabled;
                 saveBtSettings(); break;
@@ -185,10 +179,12 @@ void AppSettings::_handlePage1(KeyInput ki) {
     }
 
     if (ki.ch == 'c' || ki.ch == 'C') {
-        if (bluetoothInitialized && BLE_KEYBOARD_VALID) {
-            BLE_KEYBOARD.end(); delay(300); BLE_KEYBOARD.begin();
-        } else if (!bluetoothEnabled) {
-            enableBluetooth();
+        if (BLE_KEYBOARD_VALID) {
+            if (!bluetoothEnabled) {
+                enableBluetooth();
+            } else {
+                BLE_KEYBOARD.end(); delay(300); BLE_KEYBOARD.begin();
+            }
         }
         _needsRedraw = true; return;
     }
