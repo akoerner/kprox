@@ -59,7 +59,7 @@ String credDecrypt(const String& b64, const String& key);
 int  csGetFailedAttempts();
 void csResetFailedAttempts();
 
-// SD card helpers (always compiled; no-op on non-SD builds)
+// SD card helpers — implemented in sd_card.cpp
 bool sdMount();
 void sdUnmount();
 bool sdAvailable();

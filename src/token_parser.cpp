@@ -2,7 +2,7 @@
 #include "hid.h"
 #include "registers.h"
 #include "kps_parser.h"
-#include "sd_utils.h"
+#include "sd_card.h"
 #include "connection.h"
 #include "keymap.h"
 #include "storage.h"

@@ -1,4 +1,5 @@
 #include "credential_store.h"
+#include "sd_card.h"
 #include "storage.h"
 #include "totp.h"
 #include <ArduinoJson.h>
@@ -8,42 +9,8 @@
 #include <mbedtls/base64.h>
 #include <algorithm>
 #include <SD.h>
-#include <SPI.h>
-
-// M5Cardputer SD card uses a dedicated SPI bus separate from the display.
-// Display (FSPI): SCK=36, MOSI=35, CS=37  — do NOT use for SD.
-// SD (HSPI):      SCK=40, MOSI=14, MISO=39, CS=12
-#ifdef BOARD_M5STACK_CARDPUTER
-static constexpr int SD_CS_PIN   = 12;
-static constexpr int SD_SCK_PIN  = 40;
-static constexpr int SD_MOSI_PIN = 14;
-static constexpr int SD_MISO_PIN = 39;
-#else
-static constexpr int SD_CS_PIN   = SS;
-static constexpr int SD_SCK_PIN  = SCK;
-static constexpr int SD_MOSI_PIN = MOSI;
-static constexpr int SD_MISO_PIN = MISO;
-#endif
 
 static const char* KDBX_SD_PATH = "/kprox.kdbx";
-
-static bool      sdMounted = false;
-static SPIClass  sdSPI(HSPI);
-
-bool sdMount() {
-    if (sdMounted) return true;
-    sdSPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
-    sdMounted = SD.begin(SD_CS_PIN, sdSPI, 4000000);
-    return sdMounted;
-}
-
-void sdUnmount() {
-    if (sdMounted) {
-        SD.end();
-        sdSPI.end();
-        sdMounted = false;
-    }
-}
 
 bool sdWrite(const uint8_t* data, size_t len) {
     if (!sdMount()) return false;
@@ -81,18 +48,10 @@ void sdRemove() {
 }
 
 bool sdFormat() {
-    // Remount fresh; remove the KDBX file if present.
-    // Full FAT format requires sdmmc/fatfs APIs beyond the Arduino SD library.
     sdUnmount();
-    sdSPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
-    if (!SD.begin(SD_CS_PIN, sdSPI, 4000000)) return false;
-    sdMounted = true;
+    if (!sdMount()) return false;
     if (SD.exists(KDBX_SD_PATH)) SD.remove(KDBX_SD_PATH);
     return true;
-}
-
-bool sdAvailable() {
-    return sdMount();
 }
 
 // ============================================================

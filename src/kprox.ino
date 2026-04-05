@@ -7,6 +7,7 @@
 #include "connection.h"
 #include "token_parser.h"
 #include "api.h"
+#include "ws_mouse.h"
 #include "mtls.h"
 #include "keymap.h"
 
@@ -285,6 +286,8 @@ void setup() {
     // For full transport-layer TLS, terminate with a reverse proxy (nginx/HAProxy)
     // in front of this device, or use the ESP32-HTTPS-Server library as a drop-in.
     server.begin();
+    webSocket.begin();
+    webSocket.onEvent(handleSendMouseWebSocket);
 
     if (registers.empty()) {
         addRegister("{LEFT}{SLEEP 1000}{RIGHT}{SLEEP 1000}{UP}{SLEEP 1000}{DOWN}{SLEEP 1000}{ENTER}");
@@ -323,6 +326,7 @@ void setup() {
 void loop() {
     feedWatchdog();
     server.handleClient();
+    webSocket.loop();
     if (mtlsEnabled) serverHTTP.handleClient();
     MDNS_UPDATE();
 

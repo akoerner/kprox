@@ -13,7 +13,7 @@
 #include "kps_parser.h"
 #include "token_parser.h"
 #include "hid.h"
-#include "sd_utils.h"
+#include "sd_card.h"
 #include "registers.h"
 #include "credential_store.h"
 #include <vector>

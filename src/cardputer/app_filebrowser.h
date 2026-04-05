@@ -13,7 +13,7 @@ class AppFileBrowser : public AppBase {
 public:
     void onEnter() override;
     void onUpdate() override;
-    void onExit() override {}
+    void onExit() override { _closeView(); }
     const char* appName() const override { return "Files"; }
     const char* appHelp()  const override { return "Browse and manage SD card files.\nENTER: view file or enter directory\nD: dump to HID  DEL: delete file"; }
     const uint16_t* appIcon() const override { return fa_folder_open_48; }
@@ -37,20 +37,26 @@ private:
         size_t size;
     };
 
-    State               _state      = ST_NO_SD;
+    State               _state       = ST_NO_SD;
     bool                _needsRedraw = true;
-    String              _path;          // current directory path
+    String              _path;
     std::vector<Entry>  _entries;
-    int                 _sel        = 0;
-    int                 _scrollTop  = 0;
+    int                 _sel         = 0;
+    int                 _scrollTop   = 0;
 
-    String              _viewBuf;       // content of viewed file
-    int                 _viewLine  = 0; // first visible line
+    String              _viewPath;
+    File                _viewFile;
+    std::vector<uint32_t> _lineStarts;
+    bool                _viewScanned = false;
+    int                 _viewLine    = 0;
 
     String              _statusMsg;
-    bool                _statusOk  = false;
+    bool                _statusOk    = false;
 
     void _loadDir();
+    void _openView(const String& path);
+    void _closeView();
+    String _readViewLine(int lineNum);
     void _drawTopBar();
     void _drawBottomBar(const char* hint);
     void _drawBrowse();

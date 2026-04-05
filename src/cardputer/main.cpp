@@ -8,9 +8,11 @@
 #include "../connection.h"
 #include "../token_parser.h"
 #include "../api.h"
+#include "../ws_mouse.h"
 #include "../mtls.h"
 #include "../keymap.h"
 #include "../credential_store.h"
+#include "../sd_card.h"
 #include "../scheduled_tasks.h"
 #include "../totp.h"
 #include "../storage.h"
@@ -40,7 +42,6 @@
 #include <M5Cardputer.h>
 #include "nvs_flash.h"
 #include "nvs.h"
-#include <WebSocketsServer.h>
 
 #ifdef BOARD_HAS_USB_HID
 static void usbPreInit() __attribute__((constructor(110)));
@@ -91,7 +92,6 @@ public:
 
 WebServer        server(80);
 WebServer        serverHTTP(443);
-WebSocketsServer  webSocket(81);
 WiFiUDP          udp;
 Preferences      preferences;
 CRGB             leds[NUM_LEDS];
@@ -207,6 +207,7 @@ void setup() {
     delay(1000);
 
     M5Cardputer.begin(true);
+    sdInit();
     M5Cardputer.Speaker.setVolume(160);
 
     auto& disp = M5Cardputer.Display;
@@ -465,8 +466,8 @@ void loop() {
     feedWatchdog();
     if (wifiEnabled) {
         server.handleClient();
-        if (mtlsEnabled) serverHTTP.handleClient();
         webSocket.loop();
+        if (mtlsEnabled) serverHTTP.handleClient();
         MDNS_UPDATE();
     }
 
@@ -569,7 +570,7 @@ void loop() {
         lastBatUpdate = millis();
     }
 
-    if (ESP.getFreeHeap() < 8000) {
+    if (ESP.getFreeHeap() < 2000) {
         delay(1000);
         ESP.restart();
     }

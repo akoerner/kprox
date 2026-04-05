@@ -6,8 +6,7 @@
 #include "../credential_store.h"
 #include "../hid.h"
 #include "../kps_parser.h"
-#include "../sd_utils.h"
-#include <SD.h>
+#include "../sd_card.h"
 #include <algorithm>
 
 namespace Cardputer {
@@ -160,28 +159,74 @@ void AppFileBrowser::_drawBrowse() {
     _drawBottomBar("ENTER view  D dump  DEL delete  ESC up");
 }
 
+void AppFileBrowser::_openView(const String& path) {
+    _closeView();
+    _viewFile = SD.open(path, FILE_READ);
+    if (!_viewFile) return;
+    _viewPath    = path;
+    _viewScanned = false;
+    _viewLine    = 0;
+    _lineStarts.clear();
+    _lineStarts.push_back(0);
+}
+
+void AppFileBrowser::_closeView() {
+    if (_viewFile) _viewFile.close();
+    _lineStarts.clear();
+    _viewScanned = false;
+}
+
+static constexpr int MAX_VIEW_LINES = 200;
+static constexpr int MAX_LINE_CHARS = 200;
+
+String AppFileBrowser::_readViewLine(int lineNum) {
+    if (!_viewFile || lineNum < 0) return "";
+
+    // Scan forward lazily to discover the start of lineNum.
+    while (!_viewScanned && lineNum >= (int)_lineStarts.size()) {
+        if ((int)_lineStarts.size() >= MAX_VIEW_LINES) {
+            _viewScanned = true;
+            break;
+        }
+        // Seek to start of last known line and advance past it.
+        _viewFile.seek(_lineStarts.back());
+        int ch;
+        while (_viewFile.available() && (ch = _viewFile.read()) != '\n') {}
+        if (!_viewFile.available()) { _viewScanned = true; break; }
+        _lineStarts.push_back(_viewFile.position());
+    }
+
+    if (lineNum >= (int)_lineStarts.size()) return "";
+
+    _viewFile.seek(_lineStarts[lineNum]);
+    String line;
+    line.reserve(80);
+    int count = 0;
+    bool overflow = false;
+    while (_viewFile.available()) {
+        char c = (char)_viewFile.read();
+        if (c == '\n') break;
+        if (c == '\r') continue;
+        if (count < MAX_LINE_CHARS) { line += c; count++; }
+        else overflow = true;
+    }
+    if (overflow) line += '~';
+    return line;
+}
+
 void AppFileBrowser::_drawView() {
     auto& disp = M5Cardputer.Display;
     disp.fillScreen(FB_BG);
     _drawTopBar();
 
-    int y = FB_BAR_H + 2;
-    int rowH = 12;
+    int y      = FB_BAR_H + 2;
+    int rowH   = 12;
     int visRows = (disp.height() - FB_BAR_H - FB_BOT_H - 4) / rowH;
 
-    // Split viewBuf into lines
-    std::vector<String> lines;
-    int start = 0;
-    for (int i = 0; i <= (int)_viewBuf.length(); i++) {
-        if (i == (int)_viewBuf.length() || _viewBuf[i] == '\n') {
-            lines.push_back(_viewBuf.substring(start, i));
-            start = i + 1;
-        }
-    }
-
     disp.setTextSize(1);
-    for (int i = 0; i < visRows && (_viewLine + i) < (int)lines.size(); i++) {
-        String l = lines[_viewLine + i];
+    for (int i = 0; i < visRows; i++) {
+        String l = _readViewLine(_viewLine + i);
+        if (l.isEmpty() && (_viewLine + i) >= (int)_lineStarts.size()) break;
         if ((int)l.length() > 37) l = l.substring(0, 35) + "..";
         disp.setTextColor(disp.color565(200, 220, 200), FB_BG);
         disp.drawString(l, 2, y + i * rowH);
@@ -232,9 +277,8 @@ void AppFileBrowser::_handleBrowse(KeyInput ki) {
             _path = (e.name == "..") ? _parentPath() : _fullPath(e.name);
             _loadDir();
         } else {
-            _viewBuf  = sdReadFile(_fullPath(e.name));
-            _viewLine = 0;
-            _state    = ST_VIEW;
+            _openView(_fullPath(e.name));
+            _state = ST_VIEW;
         }
         _needsRedraw = true;
         return;
@@ -258,7 +302,7 @@ void AppFileBrowser::_handleBrowse(KeyInput ki) {
 }
 
 void AppFileBrowser::_handleView(KeyInput ki) {
-    if (ki.esc || ki.enter) { _state = ST_BROWSE; _needsRedraw = true; return; }
+    if (ki.esc || ki.enter) { _closeView(); _state = ST_BROWSE; _needsRedraw = true; return; }
     if (ki.arrowDown) { _viewLine++; _needsRedraw = true; }
     if (ki.arrowUp)   { if (_viewLine > 0) _viewLine--; _needsRedraw = true; }
 }

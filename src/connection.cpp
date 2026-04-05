@@ -27,8 +27,9 @@ void initNTP() {
 void enableBluetooth() {
     if (bluetoothEnabled) return;
     bluetoothEnabled = true;
-    if (BLE_KEYBOARD_VALID) {
+    if (!bluetoothInitialized && BLE_KEYBOARD_VALID) {
         BLE_KEYBOARD.begin();
+        BLE_MOUSE.begin();
         bluetoothInitialized = true;
     }
     saveBtSettings();
@@ -38,8 +39,10 @@ void enableBluetooth() {
 void disableBluetooth() {
     if (!bluetoothEnabled) return;
     bluetoothEnabled = false;
-    if (BLE_KEYBOARD_VALID) {
+    if (bluetoothInitialized && BLE_KEYBOARD_VALID) {
         BLE_KEYBOARD.end();
+        bluetoothInitialized = false;
+        delay(1000);
     }
     saveBtSettings();
     if (ledEnabled) setLED(LED_COLOR_BT_DISABLE, 500);
