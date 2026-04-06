@@ -35,6 +35,12 @@ static void addCorsHeaders() {
 }
 
 
+// Pre-allocated serialization buffer. serializeJson() into a growing String
+// causes repeated reallocs; using this fixed buffer eliminates those heap
+// cycles for all small/medium responses. 768B covers all typical API payloads.
+// Large responses (register lists, credential tables) keep their own String.
+static char g_resp_buf[768];
+
 static void sendEncrypted(int code, const String& json) {
     String enc = encryptResponse(json);
     if (enc.isEmpty()) {
@@ -43,6 +49,10 @@ static void sendEncrypted(int code, const String& json) {
     }
     server.sendHeader("X-Encrypted", "1");
     server.send(code, "text/plain", enc);
+}
+
+static void sendEncrypted(int code, const char* json) {
+    sendEncrypted(code, String(json));
 }
 
 static bool checkApiKey() {
@@ -133,14 +143,19 @@ void handleFileRead(String path) {
     else if (path.endsWith(".ico"))  ct = "image/x-icon";
     else if (path.endsWith(".json")) ct = "application/json";
 
-    if (SPIFFS.exists(path)) {
-        // Static assets: long cache for immutable files, no-cache for HTML
+    // Prefer pre-compressed .gz version if available.
+    // streamFile() detects the .gz extension and adds Content-Encoding: gzip
+    // automatically; the browser decompresses transparently.
+    String gzPath = path + ".gz";
+    String servePath = SPIFFS.exists(gzPath) ? gzPath : path;
+
+    if (SPIFFS.exists(servePath)) {
         if (path.endsWith(".html")) {
             server.sendHeader("Cache-Control", "no-cache, must-revalidate");
         } else {
             server.sendHeader("Cache-Control", "public, max-age=86400");
         }
-        File file = SPIFFS.open(path, "r");
+        File file = SPIFFS.open(servePath, "r");
         server.streamFile(file, ct);
         file.close();
         server.client().stop();
@@ -1699,7 +1714,85 @@ void handleCredStore() {
             credStoreWipe();
             sendEncrypted(200, "{\"status\":\"ok\"}");
 
+        } else if (action == "transfer") {
+            // TRANSFER: copy database to destination then wipe source.
+            // Requires the store to be unlocked (data must be re-serialised).
+            // POST body: { action:"transfer", location:"sd"|"nvs" }
+            String loc = doc["location"] | "";
+            if (loc != "sd" && loc != "nvs") {
+                sendEncrypted(400, "{\"error\":\"location must be sd or nvs\"}");
+                server.client().stop(); requestComplete(); return;
+            }
+            if (loc == csStorageLocation) {
+                sendEncrypted(200, "{\"status\":\"ok\",\"message\":\"Already on that location\"}");
+                server.client().stop(); requestComplete(); return;
+            }
+            if (credStoreLocked) {
+                sendEncrypted(403, "{\"error\":\"Unlock the store before transferring\"}");
+                server.client().stop(); requestComplete(); return;
+            }
+            if (loc == "sd" && !sdAvailable()) {
+                sendEncrypted(503, "{\"error\":\"SD card not available\"}");
+                server.client().stop(); requestComplete(); return;
+            }
+            {
+                String oldLoc = csStorageLocation;
+                csStorageLocation = loc;
+                if (!writeKDBX(credStoreRuntimeKey)) {
+                    csStorageLocation = oldLoc;
+                    sendEncrypted(500, "{\"error\":\"Write to destination failed — source unchanged\"}");
+                    server.client().stop(); requestComplete(); return;
+                }
+                // Wipe source only after successful write to destination
+                if (oldLoc == "sd") {
+                    sdRemove();
+                } else {
+                    preferences.begin("kprox_db", false);
+                    preferences.clear();
+                    preferences.end();
+                }
+                saveCsStorageLocation();
+            }
+            sendEncrypted(200, "{\"status\":\"ok\",\"message\":\"Database transferred and source wiped\"}");
+
+        } else if (action == "switch") {
+            // SWITCH: change which location the device reads from/writes to.
+            // No data is moved. Works locked or unlocked.
+            // POST body: { action:"switch", location:"sd"|"nvs", force:true|false }
+            // Returns 409 if destination has no database (unless force:true).
+            String loc = doc["location"] | "";
+            if (loc != "sd" && loc != "nvs") {
+                sendEncrypted(400, "{\"error\":\"location must be sd or nvs\"}");
+                server.client().stop(); requestComplete(); return;
+            }
+            if (loc == csStorageLocation) {
+                sendEncrypted(200, "{\"status\":\"ok\",\"message\":\"Already on that location\"}");
+                server.client().stop(); requestComplete(); return;
+            }
+            if (loc == "sd" && !sdAvailable()) {
+                sendEncrypted(503, "{\"error\":\"SD card not available\"}");
+                server.client().stop(); requestComplete(); return;
+            }
+            {
+                bool force = doc["force"] | false;
+                bool destHasDb = (loc == "sd")
+                    ? sdExists()
+                    : ([]{ preferences.begin("kprox_db", true);
+                            bool h = preferences.getInt("cs_db_n", 0) > 0;
+                            preferences.end(); return h; })();
+                if (!destHasDb && !force) {
+                    sendEncrypted(409, "{\"error\":\"Destination has no database. Use force:true to switch anyway\",\"code\":\"no_dest_db\"}");
+                    server.client().stop(); requestComplete(); return;
+                }
+                csStorageLocation = loc;
+                saveCsStorageLocation();
+                if (credStoreLocked == false) credStoreLock();
+            }
+            sendEncrypted(200, "{\"status\":\"ok\",\"message\":\"Active storage switched — store locked, please re-unlock\"}");
+
         } else if (action == "set_storage_location") {
+            // LEGACY: kept for backward compat. Behaves as transfer when unlocked,
+            // switch when locked. New code should use transfer or switch explicitly.
             String loc = doc["location"] | "nvs";
             if (loc != "sd") loc = "nvs";
             if (loc != csStorageLocation) {
@@ -1718,9 +1811,6 @@ void handleCredStore() {
                     if (oldLoc == "sd") sdRemove();
                     else { preferences.begin("kprox_db", false); preferences.clear(); preferences.end(); }
                 } else {
-                    // Locked — pointer-only move. Warn if destination already has data
-                    // (the web app confirms before calling, but enforce server-side too
-                    //  unless the client explicitly passes force:true).
                     bool force = doc["force"] | false;
                     if (!force) {
                         bool destHasDb = (loc == "sd")

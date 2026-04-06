@@ -1,0 +1,59 @@
+# NimBLE host stack — switching from Bluedroid saves ~50KB of heap.
+# Bluedroid BTU task (8KB) + BTC task (4KB) + env tables (~30KB) are eliminated.
+# NimBLE init is synchronous; no xTaskCreate needed in application code.
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_BLUEDROID_ENABLED=n
+
+# Single HID connection; connection slot memory is per-connection.
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+# HID reports are tiny (8B keyboard, 5B mouse); small ACL buffers are sufficient.
+CONFIG_BT_NIMBLE_ACL_BUF_COUNT=4
+CONFIG_BT_NIMBLE_ACL_BUF_SIZE=64
+# Reduce HCI event pool from default 30.
+CONFIG_BT_NIMBLE_HCI_EVT_HI_BUF_COUNT=8
+# NimBLE host task — handles GATT/ATT/HID protocol; 3KB is sufficient for HID.
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=3072
+
+# lwIP TCP buffer reduction.
+# 1×MSS (1460B) per connection instead of default 2×MSS (2920B).
+# With 4-6 simultaneous browser connections during page load, halves the
+# per-connection send buffer overhead: 6×1476B vs 6×2952B saves ~8.8KB.
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=1460
+CONFIG_LWIP_TCP_WND_DEFAULT=1460
+# Shorten TIME_WAIT from 60s to 3s so closed connection PCBs free their heap
+# promptly instead of accumulating across a full page load cycle.
+CONFIG_LWIP_TCP_MSL=3000
+# Connection backlog: we serve one HTTP client at a time; no need to queue more.
+CONFIG_LWIP_MAX_LISTEN_TCP_BACKLOG_SIZE=1
+
+# WiFi static buffer reduction via the correct sdkconfig keys.
+# Unlike wifi_init_config_t fields (which are ignored due to magic number mismatch),
+# these are read directly by the pre-built WiFi driver at esp_wifi_start() time.
+# Each static RX/TX buffer is 1600B; reducing from defaults saves ~9.6KB + 3.2KB.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=8
+
+# mDNS task stack reduction: default is 4096B. 2048B is sufficient for
+# basic service announcements when mDNS does eventually start.
+CONFIG_MDNS_TASK_STACK_SIZE=2048
+
+# Disable IPv6 — not used, saves 2-4KB of NDP/multicast/routing state at WiFi init.
+CONFIG_LWIP_IPV6=n
+
+# Socket table: 10 → 6 entries. We need: HTTP listen, WS listen, UDP, 2 active
+# connections. 6 is enough; saves ~320B.
+CONFIG_LWIP_NUM_SOCKETS=6
+
+# Bluetooth host task stack reductions.
+# These tasks are created during BLE async init (the ~84KB USB-DONE gap).
+# Our HID device sends 8-byte reports; call chains are shallow.
+# Bluedroid only — NimBLE settings removed (confirmed not in use).
+
+# Bluedroid BTU/BTC tasks removed — NimBLE has no separate host layer tasks.
+
+# System event task handles WiFi/BT connect events (simple flag sets)
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=2560
+
+# FreeRTOS software timer task — our timer callbacks are trivial
+CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=1536

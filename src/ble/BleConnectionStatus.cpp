@@ -1,22 +1,15 @@
 #include "BleConnectionStatus.h"
+#include <NimBLEDevice.h>
 
-BleConnectionStatus::BleConnectionStatus(void) {
+// NimBLE handles CCCD (notification subscription) via client writes automatically.
+// We just track connection state and restart advertising on disconnect.
+
+void BleConnectionStatus::onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) {
+    connected = true;
 }
 
-void BleConnectionStatus::onConnect(BLEServer* pServer)
-{
-  this->connected = true;
-  BLE2902* desc = (BLE2902*)this->inputKeyboard->getDescriptorByUUID(BLEUUID((uint16_t)0x2902));
-  desc->setNotifications(true);
-  desc = (BLE2902*)this->inputMouse->getDescriptorByUUID(BLEUUID((uint16_t)0x2902));
-  desc->setNotifications(true);
-}
-
-void BleConnectionStatus::onDisconnect(BLEServer* pServer)
-{
-  this->connected = false;
-  BLE2902* desc = (BLE2902*)this->inputKeyboard->getDescriptorByUUID(BLEUUID((uint16_t)0x2902));
-  desc->setNotifications(false);
-  desc = (BLE2902*)this->inputMouse->getDescriptorByUUID(BLEUUID((uint16_t)0x2902));
-  desc->setNotifications(false);  
+void BleConnectionStatus::onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) {
+    connected = false;
+    // Restart advertising — advertising data was already set in begin(), just restart.
+    NimBLEDevice::startAdvertising();
 }

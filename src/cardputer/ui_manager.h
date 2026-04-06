@@ -32,6 +32,7 @@ public:
     UIManager();
 
     void addApp(AppBase* app);
+    void reserveApps(size_t n) { _apps.reserve(n); }
     void launchApp(int index);
     void returnToLauncher();
     void update();

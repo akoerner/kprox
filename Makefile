@@ -8,8 +8,10 @@ ROOT_DIR:=$(shell dirname "$(realpath $(firstword $(MAKEFILE_LIST)))")
 
 HOST            ?= kprox.local
 KPROX_API_KEY   ?= kprox1337
-BIN_PATH        := .pio/build/m5stack-atoms3/firmware.bin
-SPIFFS_BIN_PATH := .pio/build/m5stack-atoms3/spiffs.bin
+BIN_PATH              := .pio/build/m5stack-atoms3/firmware.bin
+SPIFFS_BIN_PATH       := .pio/build/m5stack-atoms3/spiffs.bin
+CARDPUTER_BIN_PATH    := .pio/build/m5stack-cardputer/firmware.bin
+CARDPUTER_SPIFFS_PATH := .pio/build/m5stack-cardputer/spiffs.bin
 TOOLS_DIR       := $(ROOT_DIR)/tools
 
 GREEN  := $(shell printf '\033[0;32m')
@@ -42,6 +44,23 @@ build-ota: _prep_web ## Build firmware and filesystem binaries for OTA
 	platformio run -t buildfs
 	@echo "${GREEN}Firmware: $(BIN_PATH)${NC}"
 	@echo "${GREEN}Filesystem: $(SPIFFS_BIN_PATH)${NC}"
+
+## build_cardputer: Build SPIFFS and firmware for Cardputer then flash both via USB
+.PHONY: build_cardputer
+build_cardputer: _prep_web ## Build and flash firmware + filesystem for Cardputer (USB). Device must be in bootloader mode.
+	@echo "${YELLOW}Cleaning Cardputer build (ensures library flags apply)...${NC}"
+	pio run -e m5stack-cardputer -t clean
+	@echo "${YELLOW}Building Cardputer filesystem...${NC}"
+	pio run -e m5stack-cardputer -t buildfs
+	@echo "${YELLOW}Building Cardputer firmware...${NC}"
+	pio run -e m5stack-cardputer
+	@echo "${YELLOW}Flashing filesystem...${NC}"
+	pio run -e m5stack-cardputer -t uploadfs
+	@echo "${YELLOW}Flashing firmware...${NC}"
+	pio run -e m5stack-cardputer -t upload
+	@echo "${GREEN}Cardputer flash complete.${NC}"
+	@echo "${GREEN}Firmware:    $(CARDPUTER_BIN_PATH)${NC}"
+	@echo "${GREEN}Filesystem:  $(CARDPUTER_SPIFFS_PATH)${NC}"
 
 # Upload a binary via authenticated multipart POST.
 # Usage: $(call _kprox_ota_upload,api/ota,firmware,path/to/file.bin)

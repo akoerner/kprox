@@ -1061,105 +1061,173 @@ void AppSettings::_drawPage11() {
     int y = CONTENT_Y;
     disp.setTextSize(1);
 
-    bool onSd   = (csStorageLocation == "sd");
-    bool sdOk   = sdAvailable();
+    bool onSd = (csStorageLocation == "sd");
+    bool sdOk = sdAvailable();
+    bool nvsHasDb = ([]{ preferences.begin("kprox_db", true);
+                          bool h = preferences.getInt("cs_db_n", 0) > 0;
+                          preferences.end(); return h; })();
+    bool sdHasDb = sdExists();
 
-    // Current location
+    // Current location header
     disp.setTextColor(labelColor(), SETTINGS_BG);
-    disp.drawString("CS database location:", 4, y); y += 14;
+    String locLine = "Active: ";
+    locLine += onSd ? "SD card" : "NVS (built-in flash)";
+    disp.drawString(locLine, 4, y); y += 12;
 
-    // NVS row
-    bool nvsSelected = (_toggleSel == 0);
-    uint16_t nvsBg = nvsSelected ? selBgColor() : (uint16_t)SETTINGS_BG;
-    if (nvsSelected) disp.fillRect(0, y-1, disp.width(), 14, nvsBg);
-    disp.setTextColor(nvsSelected ? TFT_WHITE : labelColor(), nvsBg);
-    String nvsLabel = (!onSd ? "> " : "  ");
-    nvsLabel += "NVS (built-in flash)";
-    disp.drawString(nvsLabel, 4, y); y += 14;
+    // DB presence indicators
+    disp.setTextColor(disp.color565(120, 120, 120), SETTINGS_BG);
+    String nvsInfo = "NVS: "; nvsInfo += nvsHasDb ? "has DB" : "empty";
+    String sdInfo  = "SD:  "; sdInfo  += !sdOk ? "not found" : (sdHasDb ? "has DB" : "empty");
+    disp.drawString(nvsInfo, 4, y); disp.drawString(sdInfo, 80, y); y += 16;
 
-    // SD row
-    bool sdSelected = (_toggleSel == 1);
-    uint16_t sdBg = sdSelected ? selBgColor() : (uint16_t)SETTINGS_BG;
-    if (sdSelected) disp.fillRect(0, y-1, disp.width(), 14, sdBg);
-    uint16_t sdColor = sdOk ? (sdSelected ? (uint16_t)TFT_WHITE : labelColor())
-                             : disp.color565(100, 100, 100);
-    disp.setTextColor(sdColor, sdBg);
-    String sdLabel = (onSd ? "> " : "  ");
-    sdLabel += "SD card";
-    sdLabel += sdOk ? "" : " (not found)";
-    disp.drawString(sdLabel, 4, y); y += 18;
+    // --- Transfer row (sel 0) ---
+    // Copies DB to other location and wipes source. Requires unlock.
+    bool sel0 = (_toggleSel == 0);
+    uint16_t bg0 = sel0 ? selBgColor() : (uint16_t)SETTINGS_BG;
+    if (sel0) disp.fillRect(0, y-1, disp.width(), 26, bg0);
+    disp.setTextColor(sel0 ? TFT_WHITE : disp.color565(100, 200, 255), bg0);
+    String transferDest = onSd ? "NVS" : "SD";
+    disp.drawString(sel0 ? ">" : " ", 4, y);
+    disp.drawString("Transfer to " + transferDest, 14, y); y += 12;
+    disp.setTextColor(sel0 ? disp.color565(200, 200, 200) : disp.color565(90, 90, 90), bg0);
+    disp.drawString(" Moves DB + wipes source (unlock req.)", 14, y); y += 16;
 
-    // Format SD row
-    bool fmtSelected = (_toggleSel == 2);
-    uint16_t fmtBg = fmtSelected ? disp.color565(80, 20, 20) : (uint16_t)SETTINGS_BG;
-    if (fmtSelected) disp.fillRect(0, y-1, disp.width(), 14, fmtBg);
-    uint16_t fmtColor = sdOk ? (fmtSelected ? (uint16_t)TFT_WHITE : disp.color565(220, 80, 80))
+    // --- Switch row (sel 1) ---
+    // Changes active location with no data movement.
+    bool sel1 = (_toggleSel == 1);
+    uint16_t bg1 = sel1 ? selBgColor() : (uint16_t)SETTINGS_BG;
+    if (sel1) disp.fillRect(0, y-1, disp.width(), 26, bg1);
+    String switchDest = onSd ? "NVS" : "SD";
+    bool switchOk = onSd ? true : sdOk;
+    uint16_t sw1Color = switchOk ? (sel1 ? TFT_WHITE : disp.color565(100, 220, 130))
+                                  : disp.color565(80, 80, 80);
+    disp.setTextColor(sw1Color, bg1);
+    disp.drawString(sel1 ? ">" : " ", 4, y);
+    disp.drawString("Switch to " + switchDest, 14, y); y += 12;
+    disp.setTextColor(sel1 ? disp.color565(200, 200, 200) : disp.color565(90, 90, 90), bg1);
+    disp.drawString(" No data moved, just changes active ptr", 14, y); y += 16;
+
+    // --- Format SD row (sel 2) ---
+    bool sel2 = (_toggleSel == 2);
+    uint16_t bg2 = sel2 ? disp.color565(80, 20, 20) : (uint16_t)SETTINGS_BG;
+    if (sel2) disp.fillRect(0, y-1, disp.width(), 14, bg2);
+    uint16_t fmtColor = sdOk ? (sel2 ? TFT_WHITE : disp.color565(220, 80, 80))
                               : disp.color565(80, 80, 80);
-    disp.setTextColor(fmtColor, fmtBg);
-    disp.drawString("  Format SD card", 4, y); y += 18;
+    disp.setTextColor(fmtColor, bg2);
+    disp.drawString(sel2 ? ">" : " ", 4, y);
+    disp.drawString("Format SD card", 14, y); y += 18;
 
     if (_idSaved) {
         disp.setTextColor(disp.color565(80, 220, 80), SETTINGS_BG);
-        disp.drawString("Saved.", 4, y);
-    }
-    if (!_editBuf.isEmpty()) {
+        disp.drawString(_editBuf.isEmpty() ? "Done." : _editBuf, 4, y);
+    } else if (!_editBuf.isEmpty()) {
         disp.setTextColor(disp.color565(220, 80, 80), SETTINGS_BG);
         disp.drawString(_editBuf, 4, y);
     }
 
-    if (_sdConfirmPending) {
-        int ox = 4, oy = disp.height() - BAR_BOT_H - 58;
-        int ow = disp.width() - 8, oh = 54;
-        uint16_t obg = disp.color565(70, 30, 10);
+    // Confirmation overlay
+    if (_storageConfirmOp > 0) {
+        int ox = 4, oy = disp.height() - BAR_BOT_H - 70;
+        int ow = disp.width() - 8, oh = 66;
+        uint16_t obg = disp.color565(60, 35, 10);
         disp.fillRoundRect(ox, oy, ow, oh, 4, obg);
-        disp.drawRoundRect(ox, oy, ow, oh, 4, disp.color565(220, 140, 40));
+        disp.drawRoundRect(ox, oy, ow, oh, 4, disp.color565(220, 160, 40));
         disp.setTextSize(1);
         disp.setTextColor(TFT_WHITE, obg);
-        disp.drawString("SD database exists!", ox + 4, oy + 4);
-        disp.setTextColor(disp.color565(255, 200, 100), obg);
-        disp.drawString("NVS data migrates to SD then", ox + 4, oy + 16);
-        disp.drawString("NVS is wiped. Delete/rename", ox + 4, oy + 28);
-        disp.drawString("/kprox.kdbx to cancel.", ox + 4, oy + 40);
-        _drawBottomBar("Y = proceed and wipe NVS  N = cancel");
+        if (_storageConfirmOp == 1) {
+            // Transfer confirmation
+            String srcName = (csStorageLocation == "sd") ? "SD" : "NVS";
+            String dstName = _storageConfirmDest == "sd" ? "SD" : "NVS";
+            disp.drawString("Transfer " + srcName + " -> " + dstName + "?", ox+4, oy+4);
+            disp.setTextColor(disp.color565(255, 200, 100), obg);
+            disp.drawString("DB copied to " + dstName + ", then " + srcName, ox+4, oy+16);
+            disp.drawString("is wiped. Store must be unlocked.", ox+4, oy+28);
+            if (credStoreLocked) {
+                disp.setTextColor(disp.color565(255, 100, 80), obg);
+                disp.drawString("! Unlock the store first !", ox+4, oy+42);
+                _drawBottomBar("N = cancel");
+            } else {
+                disp.setTextColor(disp.color565(180, 255, 180), obg);
+                disp.drawString("Store is unlocked - ready.", ox+4, oy+42);
+                _drawBottomBar("Y = transfer + wipe source  N = cancel");
+            }
+        } else {
+            // Switch confirmation
+            String dstName = _storageConfirmDest == "sd" ? "SD" : "NVS";
+            bool destEmpty = (_storageConfirmDest == "sd") ? !sdHasDb : !nvsHasDb;
+            disp.drawString("Switch active DB to " + dstName + "?", ox+4, oy+4);
+            disp.setTextColor(disp.color565(255, 200, 100), obg);
+            disp.drawString("No data is moved. Store will lock.", ox+4, oy+16);
+            if (destEmpty) {
+                disp.setTextColor(disp.color565(255, 150, 80), obg);
+                disp.drawString(dstName + " has no DB - device may not unlock", ox+4, oy+28);
+                disp.drawString("until a DB is transferred there.", ox+4, oy+40);
+                _drawBottomBar("Y = switch anyway  N = cancel");
+            } else {
+                disp.setTextColor(disp.color565(180, 255, 180), obg);
+                disp.drawString(dstName + " has a DB - ready to switch.", ox+4, oy+28);
+                _drawBottomBar("Y = switch  N = cancel");
+            }
+        }
     } else {
-        _drawBottomBar("up/dn=select  ENTER=apply  fn+</>= page");
+        _drawBottomBar("up/dn=select  ENTER  fn+</>= page");
     }
 }
 
 void AppSettings::_handlePage11(KeyInput ki) {
-    if (ki.arrowLeft && !_editing) {
+    if (ki.arrowLeft && !_editing && _storageConfirmOp == 0) {
         _page = 10; _toggleSel = 0; _editing = false; _editBuf = ""; _idSaved = false;
-        _sdConfirmPending = false; _needsRedraw = true; return;
+        _sdConfirmPending = false; _storageConfirmOp = 0; _needsRedraw = true; return;
     }
-    if (ki.arrowRight && !_editing) {
+    if (ki.arrowRight && !_editing && _storageConfirmOp == 0) {
         _page = 12; _backupSel = 0; _backupScroll = 0; _backupStatus = ""; _backupRefresh();
-        _sdConfirmPending = false; _needsRedraw = true; return;
+        _sdConfirmPending = false; _storageConfirmOp = 0; _needsRedraw = true; return;
     }
 
-    // Handle pending SD overwrite confirmation
-    if (_sdConfirmPending) {
-        if (ki.ch == 'y' || ki.ch == 'Y') {
-            _sdConfirmPending = false;
-            // Proceed with switch to SD
-            String oldLoc = csStorageLocation;
-            csStorageLocation = "sd";
-            if (!credStoreLocked) {
-                if (writeKDBX(credStoreRuntimeKey)) {
-                    if (oldLoc == "nvs") { preferences.begin("kprox_db", false); preferences.clear(); preferences.end(); }
-                    saveCsStorageLocation();
-                    _idSaved = true;
-                } else {
-                    csStorageLocation = oldLoc;
-                    _editBuf = "Write failed";
-                }
-            } else {
-                saveCsStorageLocation();
-                _idSaved = true;
-            }
-        } else if (ki.ch == 'n' || ki.ch == 'N' || ki.esc) {
-            _sdConfirmPending = false;
+    // Confirmation overlay active
+    if (_storageConfirmOp > 0) {
+        bool confirmed = (ki.ch == 'y' || ki.ch == 'Y');
+        bool cancelled = (ki.ch == 'n' || ki.ch == 'N' || ki.esc);
+        if (!confirmed && !cancelled) return;
+
+        if (cancelled) {
+            _storageConfirmOp = 0;
             _editBuf = "Cancelled";
+            _needsRedraw = true; return;
         }
+
+        // confirmed
+        if (_storageConfirmOp == 1) {
+            // Transfer: copy to dest, wipe source
+            if (credStoreLocked) {
+                _storageConfirmOp = 0;
+                _editBuf = "Unlock store first";
+                _needsRedraw = true; return;
+            }
+            String oldLoc = csStorageLocation;
+            csStorageLocation = _storageConfirmDest;
+            if (writeKDBX(credStoreRuntimeKey)) {
+                if (oldLoc == "sd") {
+                    sdRemove();
+                } else {
+                    preferences.begin("kprox_db", false); preferences.clear(); preferences.end();
+                }
+                saveCsStorageLocation();
+                _editBuf = "Transferred. Source wiped.";
+                _idSaved = true;
+            } else {
+                csStorageLocation = oldLoc;
+                _editBuf = "Write failed - source unchanged";
+            }
+        } else {
+            // Switch: pointer only, lock store
+            csStorageLocation = _storageConfirmDest;
+            saveCsStorageLocation();
+            if (!credStoreLocked) credStoreLock();
+            _editBuf = "Switched. Re-unlock to use.";
+            _idSaved = true;
+        }
+        _storageConfirmOp = 0;
         _needsRedraw = true; return;
     }
 
@@ -1169,59 +1237,26 @@ void AppSettings::_handlePage11(KeyInput ki) {
     if (!ki.enter) return;
     _idSaved = false; _editBuf = "";
 
+    String dest = (csStorageLocation == "sd") ? "nvs" : "sd";
+
     if (_toggleSel == 0) {
-        // Set NVS
-        if (csStorageLocation != "nvs") {
-            String oldLoc = csStorageLocation;
-            csStorageLocation = "nvs";
-            if (!credStoreLocked) {
-                if (writeKDBX(credStoreRuntimeKey)) {
-                    if (oldLoc == "sd") sdRemove();
-                    saveCsStorageLocation();
-                    _idSaved = true;
-                } else {
-                    csStorageLocation = oldLoc;
-                    _editBuf = "Write failed";
-                }
-            } else {
-                saveCsStorageLocation();
-                _idSaved = true;
-            }
-        } else {
-            _idSaved = true;
-        }
+        // Transfer
+        if (dest == "sd" && !sdAvailable()) { _editBuf = "SD not found"; _needsRedraw = true; return; }
+        _storageConfirmDest = dest;
+        _storageConfirmOp = 1;
+
     } else if (_toggleSel == 1) {
-        // Set SD
-        if (!sdAvailable()) { _editBuf = "SD not found"; _needsRedraw = true; return; }
-        if (csStorageLocation != "sd") {
-            // Warn before overwriting an existing SD database
-            if (sdExists()) {
-                _sdConfirmPending = true;
-                _needsRedraw = true; return;
-            }
-            String oldLoc = csStorageLocation;
-            csStorageLocation = "sd";
-            if (!credStoreLocked) {
-                if (writeKDBX(credStoreRuntimeKey)) {
-                    if (oldLoc == "nvs") { preferences.begin("kprox_db", false); preferences.clear(); preferences.end(); }
-                    saveCsStorageLocation();
-                    _idSaved = true;
-                } else {
-                    csStorageLocation = oldLoc;
-                    _editBuf = "Write failed";
-                }
-            } else {
-                saveCsStorageLocation();
-                _idSaved = true;
-            }
-        } else {
-            _idSaved = true;
-        }
+        // Switch
+        if (dest == "sd" && !sdAvailable()) { _editBuf = "SD not found"; _needsRedraw = true; return; }
+        _storageConfirmDest = dest;
+        _storageConfirmOp = 2;
+
     } else if (_toggleSel == 2) {
         // Format SD
         if (!sdAvailable()) { _editBuf = "SD not found"; _needsRedraw = true; return; }
         if (sdFormat()) {
             if (csStorageLocation == "sd") credStoreLock();
+            _editBuf = "SD formatted";
             _idSaved = true;
         } else {
             _editBuf = "Format failed";
@@ -1240,6 +1275,7 @@ void AppSettings::onEnter() {
     _keymapSaved = false; _dispSel = 0; _dispEditing = false;
     _keymapSel = 0;
     _sdConfirmPending = false;
+    _storageConfirmOp = 0; _storageConfirmDest = "";
     for (int i = 0; i < S_BUILTIN_COUNT; i++) { if (activeKeymap == s_builtinKeymapIds[i]) { _keymapSel = i; break; } }
     _needsRedraw = true;
 }

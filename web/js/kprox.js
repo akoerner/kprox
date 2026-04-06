@@ -2351,33 +2351,44 @@ async function csRefresh() {
         const nvsDbBadge  = document.getElementById('csNvsHasDbBadge');
         const sdDbBadge   = document.getElementById('csSdHasDbBadge');
         const fmtBtn      = document.getElementById('csSdFormatBtn');
+        const loc    = data.storage_location || 'nvs';
+        const sdAvail = !!data.sd_available;
+        const nvsHas  = !!data.nvs_has_db;
+        const sdHas   = !!data.sd_has_db;
+
         if (locBadge) {
-            const loc = data.storage_location || 'nvs';
-            locBadge.textContent  = `Location: ${loc === 'sd' ? 'SD card' : 'NVS (flash)'}`;
+            locBadge.textContent      = `Active: ${loc === 'sd' ? 'SD card' : 'NVS (flash)'}`;
             locBadge.style.background = loc === 'sd' ? '#0d6efd' : '#6c757d';
-            locBadge.style.color = '#fff';
+            locBadge.style.color      = '#fff';
         }
         if (sdBadge) {
-            const avail = data.sd_available;
-            sdBadge.textContent  = avail ? 'SD: available' : 'SD: not found';
-            sdBadge.style.background = avail ? '#198754' : '#6c757d';
-            sdBadge.style.color = '#fff';
+            sdBadge.textContent      = sdAvail ? 'SD: available' : 'SD: not found';
+            sdBadge.style.background = sdAvail ? '#198754' : '#6c757d';
+            sdBadge.style.color      = '#fff';
         }
         if (nvsDbBadge) {
-            const has = !!data.nvs_has_db;
             nvsDbBadge.style.display    = '';
-            nvsDbBadge.textContent      = has ? 'NVS: has db' : 'NVS: empty';
-            nvsDbBadge.style.background = has ? '#6f42c1' : '#343a40';
+            nvsDbBadge.textContent      = nvsHas ? 'NVS: has DB' : 'NVS: empty';
+            nvsDbBadge.style.background = nvsHas ? '#6f42c1' : '#495057';
             nvsDbBadge.style.color      = '#fff';
         }
         if (sdDbBadge) {
-            const has = !!data.sd_has_db;
-            sdDbBadge.style.display    = data.sd_available ? '' : 'none';
-            sdDbBadge.textContent      = has ? 'SD: has db' : 'SD: empty';
-            sdDbBadge.style.background = has ? '#6f42c1' : '#343a40';
+            sdDbBadge.style.display    = sdAvail ? '' : 'none';
+            sdDbBadge.textContent      = sdHas ? 'SD: has DB' : 'SD: empty';
+            sdDbBadge.style.background = sdHas ? '#6f42c1' : '#495057';
             sdDbBadge.style.color      = '#fff';
         }
-        if (fmtBtn) fmtBtn.style.display = data.sd_available ? '' : 'none';
+        if (fmtBtn) fmtBtn.style.display = sdAvail ? '' : 'none';
+
+        // Disable transfer/switch buttons that don't apply to current state
+        const toSdT  = document.getElementById('csTransferToSdBtn');
+        const toNvsT = document.getElementById('csTransferToNvsBtn');
+        const toSdS  = document.getElementById('csSwitchToSdBtn');
+        const toNvsS = document.getElementById('csSwitchToNvsBtn');
+        if (toSdT)  { toSdT.disabled  = (loc === 'sd') || !sdAvail; toSdT.title  = loc === 'sd' ? 'Already on SD' : !sdAvail ? 'SD not available' : ''; }
+        if (toNvsT) { toNvsT.disabled = (loc === 'nvs');             toNvsT.title = loc === 'nvs' ? 'Already on NVS' : ''; }
+        if (toSdS)  { toSdS.disabled  = (loc === 'sd') || !sdAvail; toSdS.title  = loc === 'sd' ? 'Already on SD' : !sdAvail ? 'SD not available' : ''; }
+        if (toNvsS) { toNvsS.disabled = (loc === 'nvs');             toNvsS.title = loc === 'nvs' ? 'Already on NVS' : ''; }
 
         if (list) {
             if (data.locked) {
@@ -2505,44 +2516,94 @@ async function csLock() {
     }
 }
 
-async function csSetStorageLocation(loc) {
+async function csTransfer(dest) {
     if (!isConnected) return;
-    const cur      = _csLastData.storage_location || 'nvs';
-    const sdHasDb  = !!_csLastData.sd_has_db;
-    const nvsHasDb = !!_csLastData.nvs_has_db;
+    const cur     = _csLastData.storage_location || 'nvs';
+    const locked  = !!_csLastData.locked;
+    const srcName = cur === 'sd' ? 'SD card' : 'NVS (built-in flash)';
+    const dstName = dest === 'sd' ? 'SD card' : 'NVS (built-in flash)';
 
-    if (loc === cur) return;
+    if (dest === cur) { _csStatus('csStorageStatus', 'Already on that location.', true); return; }
 
-    if (loc === 'sd' && sdHasDb) {
-        const msg =
-            'An existing database is already on the SD card.\n\n' +
-            'Switching will migrate your NVS database to the SD card, ' +
-            'overwriting the file /kprox.kdbx.\n\n' +
-            'To keep the SD file, cancel and rename or delete /kprox.kdbx first.\n\n' +
-            'Proceed and overwrite the SD database?';
-        if (!confirm(msg)) return;
+    if (locked) {
+        _csStatus('csStorageStatus', '✗ Unlock the credential store first — the database must be readable to transfer it.', false);
+        return;
     }
 
-    if (loc === 'nvs' && nvsHasDb) {
-        const msg =
-            'An existing database is already in NVS (built-in flash).\n\n' +
-            'Switching will migrate your SD database to NVS, ' +
-            'overwriting the data currently stored there.\n\n' +
-            'Proceed and overwrite the NVS database?';
-        if (!confirm(msg)) return;
+    const srcHasDb = cur === 'sd' ? !!_csLastData.sd_has_db : !!_csLastData.nvs_has_db;
+    const dstHasDb = dest === 'sd' ? !!_csLastData.sd_has_db : !!_csLastData.nvs_has_db;
+
+    let msg = `Transfer database from ${srcName} to ${dstName}?
+
+`;
+    msg += `• The database will be written to ${dstName}.
+`;
+    msg += `• The source (${srcName}) will be wiped after a successful write.
+`;
+    if (dstHasDb) msg += `
+⚠ ${dstName} already has a database — it will be overwritten.
+`;
+    msg += `
+This cannot be undone. Continue?`;
+
+    if (!confirm(msg)) return;
+
+    _csStatus('csStorageStatus', '⏳ Transferring...', true);
+    try {
+        const resp = await apiFetch(`${getApiEndpoint()}/api/credstore`, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'transfer', location: dest })
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            _csStatus('csStorageStatus', `✓ Database transferred to ${dstName}. Source wiped.`, true);
+            await csRefresh();
+        } else {
+            _csStatus('csStorageStatus', '✗ ' + (data.error || 'Transfer failed'), false);
+        }
+    } catch(e) { _csStatus('csStorageStatus', '✗ ' + e.message, false); }
+}
+
+async function csSwitch(dest) {
+    if (!isConnected) return;
+    const cur     = _csLastData.storage_location || 'nvs';
+    const dstName = dest === 'sd' ? 'SD card' : 'NVS (built-in flash)';
+    const dstHasDb = dest === 'sd' ? !!_csLastData.sd_has_db : !!_csLastData.nvs_has_db;
+
+    if (dest === cur) { _csStatus('csStorageStatus', 'Already on that location.', true); return; }
+
+    let msg = `Switch active database location to ${dstName}?
+
+`;
+    msg += `• No data will be moved.
+`;
+    msg += `• The store will lock — re-unlock after switching.
+`;
+    if (!dstHasDb) {
+        msg += `
+⚠ ${dstName} has no database.
+`;
+        msg += `You will not be able to unlock the credential store until you transfer a database there.
+`;
+        msg += `Only proceed if you know what you are doing.
+`;
     }
+    msg += `
+Continue?`;
+
+    if (!confirm(msg)) return;
 
     try {
         const resp = await apiFetch(`${getApiEndpoint()}/api/credstore`, {
             method: 'POST',
-            body: JSON.stringify({ action: 'set_storage_location', location: loc, force: true })
+            body: JSON.stringify({ action: 'switch', location: dest, force: !dstHasDb })
         });
         const data = await resp.json();
         if (resp.ok) {
-            _csStatus('csStorageStatus', `✓ Stored in ${loc === 'sd' ? 'SD card' : 'NVS (flash)'}.`, true);
+            _csStatus('csStorageStatus', `✓ Active location switched to ${dstName}. Store locked — please re-unlock.`, true);
             await csRefresh();
         } else {
-            _csStatus('csStorageStatus', '✗ ' + (data.error || 'Failed'), false);
+            _csStatus('csStorageStatus', '✗ ' + (data.error || 'Switch failed'), false);
         }
     } catch(e) { _csStatus('csStorageStatus', '✗ ' + e.message, false); }
 }

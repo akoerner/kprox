@@ -71,13 +71,9 @@ String encryptResponse(const String& plaintext) {
 String generateNonce() {
     uint8_t bytes[16];
     for (int i = 0; i < 16; i++) bytes[i] = (uint8_t)esp_random();
-    String hex;
-    hex.reserve(32);
-    for (int i = 0; i < 16; i++) {
-        if (bytes[i] < 0x10) hex += '0';
-        hex += String(bytes[i], HEX);
-    }
-    return hex;
+    char buf[33];
+    for (int i = 0; i < 16; i++) snprintf(buf + i * 2, 3, "%02x", bytes[i]);
+    return String(buf);
 }
 
 bool verifyHMAC(const String& nonce, const String& hmacHex) {

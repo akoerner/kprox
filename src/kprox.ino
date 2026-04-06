@@ -397,7 +397,7 @@ void loop() {
         feedWatchdog();
     }
 
-    if (ESP.getFreeHeap() < 5000) {
+    if (ESP.getFreeHeap() < MIN_HEAP_FREE) {
         blinkLED(5, LED_COLOR_MEMORY_WDT, LED_MEMORY_WDT_DUTY_CYCLE);
         delay(1000);
         ESP.restart();

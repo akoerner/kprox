@@ -96,6 +96,9 @@ private:
 
     // SD storage confirmation state
     bool            _sdConfirmPending = false;
+    // 0=none, 1=transfer pending, 2=switch pending
+    int             _storageConfirmOp = 0;
+    String          _storageConfirmDest; // "sd" or "nvs" 
     void _connectWifi();
     void _drawInputField(int x, int y, int w, const String& text, bool active, bool masked = false);
     void _drawToggleRow(int y, bool selected, const char* label, bool enabled,

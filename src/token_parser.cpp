@@ -1391,10 +1391,14 @@ void parseAndSendText(const String& text, std::map<String, String>& vars) {
             };
 
             if (u == "DEVICE_SETTINGS_REPORT") {
-                // Print all settings as a human-readable report via HID
-                String out = "=== KProx Device Settings ===\r\n";
+                String out;
+                out.reserve(1024);
+                out += "=== KProx Device Settings ===\r\n";
                 for (const auto& s : SETTINGS) {
-                    out += String(s.label) + ": " + (isRedacted(s.label) ? REDACTED : s.get()) + "\r\n";
+                    out += s.label;
+                    out += ": ";
+                    out += isRedacted(s.label) ? REDACTED : s.get();
+                    out += "\r\n";
                 }
                 sendPlainText(out);
             } else {

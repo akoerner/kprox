@@ -731,19 +731,38 @@
                         </div>
                         <div style="padding:12px;border:1px solid #dee2e6;border-radius:6px;margin-bottom:16px;">
                             <h4 style="margin:0 0 8px;">Storage Location</h4>
-                            <p style="font-size:12px;color:#6c757d;margin:0 0 10px;">
-                                The credential store database can be stored in built-in flash (NVS) or on the SD card.
-                                When the store is unlocked, switching location migrates the database automatically.
-                            </p>
-                            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
-                                <span id="csStorageLocationBadge" style="font-size:12px;padding:3px 10px;border-radius:4px;background:#343a40;color:#adb5bd;">Location: unknown</span>
+                            <!-- Status badges row -->
+                            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+                                <span id="csStorageLocationBadge" style="font-size:12px;padding:3px 10px;border-radius:4px;background:#343a40;color:#adb5bd;">Active: unknown</span>
                                 <span id="csSdAvailableBadge" style="font-size:12px;padding:3px 10px;border-radius:4px;background:#343a40;color:#adb5bd;">SD: unknown</span>
-                                <span id="csNvsHasDbBadge" style="font-size:12px;padding:3px 10px;border-radius:4px;background:#343a40;color:#adb5bd;display:none;">NVS: no db</span>
-                                <span id="csSdHasDbBadge"  style="font-size:12px;padding:3px 10px;border-radius:4px;background:#343a40;color:#adb5bd;display:none;">SD: no db</span>
+                                <span id="csNvsHasDbBadge" style="font-size:12px;padding:3px 10px;border-radius:4px;background:#343a40;color:#adb5bd;display:none;">NVS: —</span>
+                                <span id="csSdHasDbBadge"  style="font-size:12px;padding:3px 10px;border-radius:4px;background:#343a40;color:#adb5bd;display:none;">SD: —</span>
                             </div>
-                            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
-                                <button onclick="csSetStorageLocation('nvs')">Use NVS (flash)</button>
-                                <button onclick="csSetStorageLocation('sd')">Use SD Card</button>
+                            <!-- Transfer card -->
+                            <div style="border:1px solid #0d6efd33;border-radius:6px;padding:10px;margin-bottom:10px;background:#f0f5ff;">
+                                <div style="font-weight:600;font-size:13px;margin-bottom:4px;color:#0d6efd;">⇄ Transfer Database</div>
+                                <div style="font-size:12px;color:#495057;margin-bottom:8px;">
+                                    Copies the database to the other location and <strong>wipes the source</strong>.
+                                    The store must be <strong>unlocked</strong> so the data can be re-serialised.
+                                    Source is only erased after a confirmed successful write.
+                                </div>
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                    <button id="csTransferToSdBtn" onclick="csTransfer('sd')" style="background:#0d6efd;color:#fff;">Transfer → SD Card</button>
+                                    <button id="csTransferToNvsBtn" onclick="csTransfer('nvs')" style="background:#6f42c1;color:#fff;">Transfer → NVS (flash)</button>
+                                </div>
+                            </div>
+                            <!-- Switch card -->
+                            <div style="border:1px solid #19875433;border-radius:6px;padding:10px;margin-bottom:10px;background:#f0fff4;">
+                                <div style="font-weight:600;font-size:13px;margin-bottom:4px;color:#198754;">⇌ Switch Active Location</div>
+                                <div style="font-size:12px;color:#495057;margin-bottom:8px;">
+                                    Changes which location the device reads from — <strong>no data is moved</strong>.
+                                    Works locked or unlocked. The store will lock after switching;
+                                    re-unlock to access credentials. Only switch if the destination already has a database.
+                                </div>
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                    <button id="csSwitchToSdBtn" onclick="csSwitch('sd')" style="background:#198754;color:#fff;">Switch → SD Card</button>
+                                    <button id="csSwitchToNvsBtn" onclick="csSwitch('nvs')" style="background:#20c997;color:#fff;">Switch → NVS (flash)</button>
+                                </div>
                             </div>
                             <div id="csStorageStatus" style="font-size:12px;margin-top:4px;"></div>
                         </div>

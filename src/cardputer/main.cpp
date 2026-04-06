@@ -39,6 +39,7 @@
 #include "app_nostrprox.h"
 #include "app_ircprox.h"
 #include "app_kproxchat.h"
+#include "../debug_hid.h"
 #include <M5Cardputer.h>
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -96,8 +97,10 @@ WiFiUDP          udp;
 Preferences      preferences;
 CRGB             leds[NUM_LEDS];
 
-// Constructed in setup() after settings are loaded so the BT device name
-// and battery level reflect persisted values on every boot.
+// Storage in BSS; constructed via placement new in setup() after settings load
+// so the BT device name / battery level reflect persisted values on every boot.
+alignas(BleComboKeyboard) static uint8_t _keyboardBuf[sizeof(BleComboKeyboard)];
+alignas(BleComboMouse)    static uint8_t _mouseBuf[sizeof(BleComboMouse)];
 BleComboKeyboard* Keyboard = nullptr;
 BleComboMouse*    Mouse    = nullptr;
 
@@ -198,21 +201,28 @@ static void showSplash() {
     disp.drawString("HID Automation", disp.width() / 2, disp.height() / 2 + 22);
 
     disp.setTextDatum(TL_DATUM);
-    delay(2000);
+    delay(500);
 }
 
 // ---- Setup ----
 
 void setup() {
-    delay(1000);
+    debugHidInit();
+    DHID_HEAP("BOOT");
 
+    DHID("SETUP", "M5 begin");
     M5Cardputer.begin(true);
+    DHID_HEAP("M5");
+
+    DHID("SETUP", "sdInit");
     sdInit();
+    DHID_HEAP("SD");
     M5Cardputer.Speaker.setVolume(160);
 
     auto& disp = M5Cardputer.Display;
     disp.setBrightness(g_displayBrightness);
 
+    DHID("SETUP", "watchdog+rng");
     initWatchdog();
     randomSeed(esp_random());
 
@@ -221,6 +231,7 @@ void setup() {
     FastLED.clear();
     FastLED.show();
 
+    DHID("SETUP", "load settings");
     loadRegisters();
     loadBtSettings();
     loadWiFiSettings();
@@ -242,42 +253,73 @@ void setup() {
     loadKeymapSettings();
     loadUSBSettings();
     loadUSBIdentitySettings();
+    DHID_HEAP("CFG");
 
     if (ledEnabled) {
         for (int i = 0; i < 3; i++) { setLED(LED_COLOR_BOOT, 200); delay(200); feedWatchdog(); }
     }
 
+    // Start WiFi immediately after settings load so it connects in the background
+    // while BLE init, USB async tasks, and SPIFFS provisioning run in parallel.
+    // Previously WiFi started at ~18s; now it starts at ~2s, saving ~16s.
+    if (wifiEnabled) {
+        WiFi.setHostname(hostname);
+        WiFi.mode(WIFI_STA);
+        WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
+        DHID("WIFI", "begin (early)");
+    } else {
+        WiFi.mode(WIFI_OFF);
+    }
+
+    DHID("SETUP", "splash");
     if (!bootRegEnabled) showSplash();
 
-    if (!SPIFFS.begin(true)) { /* SPIFFS mount failed */ }
+    DHID("SETUP", "SPIFFS");
+    if (!SPIFFS.begin(true)) { DHID("SPIFFS", "FAILED"); }
     feedWatchdog();
+    DHID("SETUP", "keymapInit");
     keymapInit();
+    DHID("SETUP", "credStoreInit");
     credStoreInit();
+    DHID("SETUP", "totpInit");
     totpInit();
+    DHID("SETUP", "loadScheduled");
     loadScheduledTasks();
+    DHID_HEAP("PRE-BLE");
 
     // Construct BLE objects here — after settings are loaded — so the device
     // name and manufacturer are the persisted values, not compile-time defaults.
     // Battery level is read live on Cardputer; other boards report 100.
+    DHID("BLE", "new keyboard");
     uint8_t batLevel = (uint8_t)constrain(M5Cardputer.Power.getBatteryLevel(), 0, 100);
-    Keyboard = new BleComboKeyboard(usbProduct.c_str(), usbManufacturer.c_str(), batLevel);
-    Mouse    = new BleComboMouse(Keyboard);
+    Keyboard = new(_keyboardBuf) BleComboKeyboard(usbProduct.c_str(), usbManufacturer.c_str(), batLevel);
+    DHID("BLE", "new mouse");
+    Mouse    = new(_mouseBuf) BleComboMouse(Keyboard);
+    DHID_HEAP("BLE-OBJ");
 
     if (bluetoothEnabled) {
+        DHID("BLE", "keyboard begin");
         Keyboard->begin();
+        DHID("BLE", "mouse begin");
         Mouse->begin();
         bluetoothInitialized = true;
+        DHID_HEAP("BLE-INIT");
     }
 
     if (usbEnabled) {
+        DHID("USB", "begin");
         USB.begin();
         KProxConsumer.begin();  // creates send semaphore; addDevice() ran in constructor
-        if (usbKeyboardEnabled) { USBKeyboard.begin(); usbKeyboardReady = true; }
+        if (usbKeyboardEnabled) {
+            USBKeyboard.begin();
+            usbKeyboardReady = true;
+            debugHidFlush();  // USB HID keyboard ready — output crash log + buffered msgs
+        }
         if (usbMouseEnabled)    { USBMouse.begin();    usbMouseReady    = true; }
         usbInitialized   = true;
+        DHID_HEAP("USB-DONE");
     }
 
-    delay(500);
     if (bluetoothEnabled) BLE_KEYBOARD.releaseAll();
     if (usbEnabled && usbInitialized) { if (usbKeyboardReady) USBKeyboard.releaseAll(); if (KProxConsumer.isReady()) { KProxConsumer.sendConsumer(0,0); KProxConsumer.sendSystem(0); } }
     feedWatchdog();
@@ -340,15 +382,8 @@ void setup() {
     mouseBatch.lastUpdate   = 0;
     mouseBatch.hasMovement  = false;
 
-    WiFi.setHostname(hostname);
-
-    if (wifiEnabled) {
-        // Start WiFi in the background — QRProx shows progress on first boot
-        WiFi.mode(WIFI_STA);
-        WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
-        if (udpEnabled) udp.begin(UDP_DISCOVERY_PORT);
-    } else {
-        WiFi.mode(WIFI_OFF);
+    if (wifiEnabled && udpEnabled) {
+        udp.begin(UDP_DISCOVERY_PORT);
     }
 
     if (registers.empty()) {
@@ -359,22 +394,39 @@ void setup() {
     }
 
     if (wifiEnabled) {
+        DHID("WIFI", "setupRoutes");
         setupRoutes();
-        server.begin();
-        webSocket.begin();
-        webSocket.onEvent(handleSendMouseWebSocket);
+
+        // Wait for WiFi to fully connect before constructing apps.
+        // App constructors fragment the heap: APPS-CTORS drops maxBlk to ~564B.
+        // DHCP packets (~600B) fail to allocate mid-construction, silently
+        // preventing WiFi from ever getting an IP. Waiting here lets DHCP
+        // complete while we still have ~6KB free with a larger contiguous block.
+        // Temporary handshake/DHCP buffers are freed before apps start.
+        DHID("WIFI", "waiting for connect");
+        unsigned long _wifiWait = millis();
+        while (WiFi.status() != WL_CONNECTED && millis() - _wifiWait < 20000) {
+            feedWatchdog();
+            delay(100);
+        }
+        DHID("WIFI", WiFi.status() == WL_CONNECTED ? "connected" : "timeout");
+        DHID("IP", WiFi.localIP().toString().c_str());
+        DHID_HEAP("WIFI-CONN");
     }
 
     feedWatchdog();
 
     if (ledEnabled && !registers.empty()) {
-        delay(1000);
         blinkLED(activeRegister + 1, LED_COLOR_REG_CHANGE);
     }
 
     feedWatchdog();
+    DHID_HEAP("PRE-APPS");
 
-    // Register apps: Launcher first, then real apps in display order
+    // Register apps: Launcher first, then real apps in display order.
+    // Reserve the exact count upfront — eliminates 5-6 realloc cycles that
+    // would otherwise fragment the heap during registration.
+    Cardputer::uiManager.reserveApps(22);
     static Cardputer::AppLauncher    launcher;
     static Cardputer::AppKProx       appKProx;
     static Cardputer::AppFuzzyProx   appFuzzyProx;
@@ -397,6 +449,7 @@ void setup() {
     static Cardputer::AppIRCProx     appIRCProx;
     static Cardputer::AppKProxChat   appKProxChat;
     static Cardputer::AppSettings    appSettings;
+    DHID_HEAP("APPS-CTORS");
 
     // Registration order determines launcher icon index (0 = launcher, 1..N = user apps)
     Cardputer::uiManager.addApp(&launcher);    // 0
@@ -456,17 +509,24 @@ void setup() {
     }
 
     int startApp = (defaultAppIndex >= 1 && defaultAppIndex < numApps) ? defaultAppIndex : 1;
+    DHID_HEAP("PRE-LAUNCH");
     Cardputer::uiManager.launchApp(startApp);
     Cardputer::uiManager.notifyInteraction();
+    DHID_HEAP("SETUP-END");
 }
 
 // ---- Loop ----
 
 void loop() {
     feedWatchdog();
+    static bool serverStarted = false;
+    static bool loopLogged    = false;
+    if (!loopLogged) { loopLogged = true; DHID_HEAP("LOOP-1st"); }
     if (wifiEnabled) {
-        server.handleClient();
-        webSocket.loop();
+        if (serverStarted) {
+            server.handleClient();
+            webSocket.loop();
+        }
         if (mtlsEnabled) serverHTTP.handleClient();
         MDNS_UPDATE();
     }
@@ -482,13 +542,27 @@ void loop() {
 
     if (WiFi.status() == WL_CONNECTED) {
         if (!wifiConnectedTime) wifiConnectedTime = millis();
-        // NTP: retry whenever WiFi connects (also covers late connections)
+        if (!serverStarted) {
+            serverStarted = true;
+            DHID("WIFI", "connected - starting servers");
+            DHID_HEAP("PRE-SRV");
+            server.begin();
+            webSocket.begin();
+            webSocket.onEvent(handleSendMouseWebSocket);
+            DHID_HEAP("SRV-UP");
+        }
+        // NTP: configTime() is cheap (~200B); run whenever heap > 6KB.
         if (!ntpSyncAttempted && millis() - wifiConnectedTime > 2000) {
             ntpSyncAttempted = true;
-            initNTP();
+            if (ESP.getFreeHeap() > 6000) initNTP();
+            else DHID("NTP", "skipped - low heap");
         }
+        // MDNS: MDNS.begin() allocates a 4KB FreeRTOS task + sockets + queues = ~10KB.
+        // Only start it if there is comfortable headroom above that cost.
         if (!mdnsEnabled && !mdnsSetupAttempted && millis() - wifiConnectedTime > 10000) {
-            mdnsSetupAttempted = true; setupMDNS();
+            mdnsSetupAttempted = true;
+            if (ESP.getFreeHeap() > 25000) setupMDNS();
+            else DHID("MDNS", "skipped - low heap");
         }
     } else if (WiFi.status() != WL_CONNECTED) {
         wifiConnectedTime  = 0;
@@ -570,7 +644,7 @@ void loop() {
         lastBatUpdate = millis();
     }
 
-    if (ESP.getFreeHeap() < 2000) {
+    if (ESP.getFreeHeap() < MIN_HEAP_FREE) {
         delay(1000);
         ESP.restart();
     }

@@ -64,3 +64,9 @@
 
 // ---- Mouse batching (ms) ----
 #define MOUSE_BATCH_TIMEOUT      50
+
+// ---- Heap guard (bytes) ----
+// Must stay above lwIP's minimum packet-buffer requirement (~3-4 KB).
+// Values of 8000/5000 caused spurious restarts during WebSocket operation;
+// 4000 is the practical floor for stable WiFi + WebSocket coexistence.
+#define MIN_HEAP_FREE            500

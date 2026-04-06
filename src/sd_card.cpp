@@ -18,7 +18,7 @@ static bool sdMounted = false;
 // Uses the global SPI (FSPI/SPI2 on ESP32-S3) — M5Cardputer 1.1.x
 // pre-claims SPI3/HSPI, so FSPI must be used and initialised eagerly.
 void sdInit() {
-    SPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
+    SPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, -1);
     sdMounted = SD.begin(SD_CS_PIN, SPI, 25000000);
 }
 

@@ -221,11 +221,14 @@ void loadDefaultAppSettings() {
 // appOrder  — stored as comma-separated ints, e.g. "1,2,3,4,5,6,7,8,9,10,11"
 // appHidden — stored as comma-separated 0/1 flags in the same index order
 void saveAppLayout() {
-    String order, hidden;
+    // 22 apps × 3 chars (max "22,") + null — no heap churn from String concat loop.
+    char order[96]  = {};
+    char hidden[96] = {};
+    char *op = order, *hp = hidden;
     for (size_t i = 0; i < appOrder.size(); i++) {
-        if (i) { order += ','; hidden += ','; }
-        order  += String(appOrder[i]);
-        hidden += String(appHidden.size() > i && appHidden[i] ? 1 : 0);
+        if (i) { *op++ = ','; *hp++ = ','; }
+        op += snprintf(op, 4, "%d", appOrder[i]);
+        hp += snprintf(hp, 2, "%d", (appHidden.size() > i && appHidden[i]) ? 1 : 0);
     }
     preferences.begin("kprox", false);
     preferences.putString("appOrder",  order);
