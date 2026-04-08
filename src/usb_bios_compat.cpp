@@ -9,14 +9,22 @@
 //
 // Patches applied to the live descriptor buffer:
 //   Device:     bDeviceClass/Sub/Protocol → 0/0/0   (per-interface, not 0xEF)
+//               bcdUSB                   → 1.10     (BIOS expects USB 1.1 boot keyboard;
+//                                                     2.00 rejected by most BIOS HID stacks)
+//               iSerialNumber            → 0        (suppress serial; extra string fetch
+//                                                     stalls some ThinkPad BIOS versions)
 //   Interface:  bInterfaceSubClass        → 1        (Boot Interface)
 //               bInterfaceProtocol        → 1        (Keyboard)
+//               iInterface               → 0        (suppress interface string)
 //   Config:     bmAttributes              → 0xA0     (bus-powered + remote wakeup;
 //                                                     0xC0 = self-powered, some BIOS skip)
 //               MaxPower                 → 50       (100mA; 500mA refused by strict BIOS)
-//   HID IN EP:  bInterval                → 10       (10ms; standard keyboard rate;
-//                                                     1ms can fail BIOS scheduler)
+//               iConfiguration           → 0        (suppress config string)
+//   HID IN EP:  bInterval                → 10       (10ms; standard keyboard polling rate)
 //               wMaxPacketSize           → 8        (USB HID boot keyboard mandatory)
+//               (IN moved before OUT in stream; BIOS walks endpoints and uses
+//                the first interrupt endpoint as keyboard input — if OUT is
+//                first the BIOS polls it and receives no reports)
 //   HID OUT EP: wMaxPacketSize           → 1        (boot LED report: 1 byte)
 
 #ifdef BOARD_M5STACK_CARDPUTER
@@ -33,6 +41,8 @@ extern uint16_t usbPidOverride;
 void usbBiosCompatPatchDescriptors(void) {
     uint8_t* dev = (uint8_t*)tud_descriptor_device_cb();
     if (dev) {
+        dev[2] = 0x10;  // bcdUSB = 1.10 (BIOS boot keyboard profile; 2.00 rejected by most BIOS)
+        dev[3] = 0x01;
         dev[4] = 0;     // bDeviceClass    = 0x00 (per-interface)
         dev[5] = 0;     // bDeviceSubClass
         dev[6] = 0;     // bDeviceProtocol
@@ -45,11 +55,13 @@ void usbBiosCompatPatchDescriptors(void) {
             dev[10] =  usbPidOverride        & 0xFF;
             dev[11] = (usbPidOverride >> 8)  & 0xFF;
         }
+        dev[16] = 0;    // iSerialNumber: suppress — extra string GET_DESCRIPTOR stalls some BIOS
     }
 
     uint8_t* cfg = (uint8_t*)tud_descriptor_configuration_cb(0);
     if (!cfg) return;
 
+    cfg[6] = 0;     // iConfiguration: suppress — matches working boot keyboard profile
     cfg[7] = 0xA0;  // bmAttributes: bus-powered + remote wakeup (not 0xC0 self-powered)
     cfg[8] = 50;    // bMaxPower: 100mA (250 = 500mA refused by strict BIOS power budgets)
 
@@ -61,17 +73,24 @@ void usbBiosCompatPatchDescriptors(void) {
         if (p[1] == 0x04 && p[5] == 0x03) {    // Interface descriptor, HID class
             p[6] = 1;   // bInterfaceSubClass = 1 (Boot Interface)
             p[7] = 1;   // bInterfaceProtocol = 1 (Keyboard)
+            p[8] = 0;   // iInterface: suppress
 
+            uint8_t* ep_out = nullptr;
+            uint8_t* ep_in  = nullptr;
             uint8_t* q = p + p[0];
             while (q < end && q[0] > 0 && q[1] != 0x04) {
                 if (q[1] == 0x05) {
-                    if (q[2] & 0x80) {
-                        q[4] = 8; q[5] = 0; q[6] = 10;
-                    } else {
-                        q[4] = 1; q[5] = 0;
-                    }
+                    if (q[2] & 0x80) { q[4] = 8; q[5] = 0; q[6] = 10; ep_in  = q; }
+                    else             { q[4] = 1; q[5] = 0;              ep_out = q; }
                 }
                 q += q[0];
+            }
+            // Move IN before OUT so the BIOS finds the keyboard input endpoint first
+            if (ep_out && ep_in && ep_out < ep_in) {
+                uint8_t tmp[7];
+                memcpy(tmp,    ep_out, 7);
+                memcpy(ep_out, ep_in,  7);
+                memcpy(ep_in,  tmp,    7);
             }
             break;
         }
@@ -82,6 +101,13 @@ void usbBiosCompatPatchDescriptors(void) {
 // ── Boot-protocol report handling ─────────────────────────────────────────────
 
 static volatile uint8_t s_hid_protocol = 1;  // matches TinyUSB default (REPORT)
+
+// Reset to report protocol on every new SET_CONFIGURATION. Without this,
+// s_hid_protocol stays 0 after BIOS boot-protocol use, causing the OS to
+// receive raw 8-byte boot reports instead of report-ID-prefixed HID reports.
+extern "C" void tud_mount_cb(void) {
+    s_hid_protocol = 1;
+}
 
 extern "C" void tud_hid_set_protocol_cb(uint8_t itf, uint8_t protocol) {
     (void)itf; s_hid_protocol = protocol;
