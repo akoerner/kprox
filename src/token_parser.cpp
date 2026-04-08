@@ -841,13 +841,16 @@ static bool isKeyToken(const String& upper) {
 }
 
 int resolveRegisterArg(const String& arg) {
-    bool allDigits = !arg.isEmpty();
-    for (char c : arg) { if (!isDigit(c)) { allDigits = false; break; } }
+    String a = arg;
+    if (a.length() >= 2 && a[0] == '"' && a[a.length()-1] == '"')
+        a = a.substring(1, a.length() - 1);
+    bool allDigits = !a.isEmpty();
+    for (char c : a) { if (!isDigit(c)) { allDigits = false; break; } }
     if (allDigits) {
-        int idx = arg.toInt() - 1;
+        int idx = a.toInt() - 1;
         return (idx >= 0 && (size_t)idx < registers.size()) ? idx : -1;
     }
-    String argUp = arg; argUp.toUpperCase();
+    String argUp = a; argUp.toUpperCase();
     for (int i = 0; i < (int)registerNames.size(); i++) {
         String n = registerNames[i]; n.toUpperCase();
         if (n == argUp) return i;

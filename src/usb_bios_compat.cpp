@@ -13,8 +13,11 @@
 //               bInterfaceProtocol        → 1        (Keyboard)
 //   Config:     bmAttributes              → 0xA0     (bus-powered + remote wakeup;
 //                                                     0xC0 = self-powered, some BIOS skip)
+//               MaxPower                 → 50       (100mA; 500mA refused by strict BIOS)
 //   HID IN EP:  bInterval                → 10       (10ms; standard keyboard rate;
 //                                                     1ms can fail BIOS scheduler)
+//               wMaxPacketSize           → 8        (USB HID boot keyboard mandatory)
+//   HID OUT EP: wMaxPacketSize           → 1        (boot LED report: 1 byte)
 
 #ifdef BOARD_M5STACK_CARDPUTER
 
@@ -48,6 +51,7 @@ void usbBiosCompatPatchDescriptors(void) {
     if (!cfg) return;
 
     cfg[7] = 0xA0;  // bmAttributes: bus-powered + remote wakeup (not 0xC0 self-powered)
+    cfg[8] = 50;    // bMaxPower: 100mA (250 = 500mA refused by strict BIOS power budgets)
 
     uint16_t total = (uint16_t)cfg[2] | ((uint16_t)cfg[3] << 8);
     uint8_t* p   = cfg;
@@ -58,12 +62,14 @@ void usbBiosCompatPatchDescriptors(void) {
             p[6] = 1;   // bInterfaceSubClass = 1 (Boot Interface)
             p[7] = 1;   // bInterfaceProtocol = 1 (Keyboard)
 
-            // Scan past this interface descriptor for the HID IN endpoint
             uint8_t* q = p + p[0];
-            while (q < end && q[0] > 0) {
-                if (q[1] == 0x05 && (q[2] & 0x80)) {   // Endpoint, IN direction
-                    q[6] = 10;  // bInterval = 10ms (standard keyboard polling rate)
-                    break;
+            while (q < end && q[0] > 0 && q[1] != 0x04) {
+                if (q[1] == 0x05) {
+                    if (q[2] & 0x80) {
+                        q[4] = 8; q[5] = 0; q[6] = 10;
+                    } else {
+                        q[4] = 1; q[5] = 0;
+                    }
                 }
                 q += q[0];
             }
