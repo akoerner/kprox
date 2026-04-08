@@ -99,6 +99,10 @@
                         <span class="status-value" style="font-size:11px;text-align:right;" id="ipAddress">-</span>
                         <span class="status-label" style="font-size:11px;">Host:</span>
                         <span class="status-value" style="font-size:11px;text-align:right;" id="hostname">-</span>
+                        <span class="status-label" style="font-size:11px;">VID:</span>
+                        <span class="status-value" style="font-size:11px;text-align:right;font-family:monospace;" id="sidebarVid">-</span>
+                        <span class="status-label" style="font-size:11px;">PID:</span>
+                        <span class="status-value" style="font-size:11px;text-align:right;font-family:monospace;" id="sidebarPid">-</span>
                         <span class="status-label" style="font-size:11px;">Uptime:</span>
                         <span class="status-value" style="font-size:11px;text-align:right;" id="uptime">-</span>
                         <span class="status-label" style="font-size:11px;">Chip:</span>
@@ -346,10 +350,20 @@
                                 <input type="text" id="newUsbSerial" placeholder="KProx-001" />
                                 <div class="settings-hint">Serial number string in the USB descriptor.</div>
                             </div>
+                            <div class="settings-field">
+                                <label class="settings-label">USB Vendor ID (VID)</label>
+                                <input type="text" id="newUsbVid" placeholder="046D" maxlength="4" style="font-family:monospace;text-transform:uppercase;" />
+                                <div class="settings-hint">4-hex-digit USB Vendor ID. 046D = Logitech (BIOS-compatible). Reboot required.</div>
+                            </div>
+                            <div class="settings-field">
+                                <label class="settings-label">USB Product ID (PID)</label>
+                                <input type="text" id="newUsbPid" placeholder="C31C" maxlength="4" style="font-family:monospace;text-transform:uppercase;" />
+                                <div class="settings-hint">4-hex-digit USB Product ID. C31C = K120. Set both to 0000 to use firmware default. Reboot required.</div>
+                            </div>
                         </div>
                         <div style="display:flex;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap;">
                             <button onclick="updateDeviceSettings()">Save Identity</button>
-                            <span style="font-size:11px;color:#6c757d;">Current: <span id="deviceManufacturer">-</span> / <span id="deviceProduct">-</span></span>
+                            <span style="font-size:11px;color:#6c757d;">Current: <span id="deviceManufacturer">-</span> / <span id="deviceProduct">-</span> &nbsp;VID:<span id="deviceVid">-</span> PID:<span id="devicePid">-</span></span>
                         </div>
                     </div>
 

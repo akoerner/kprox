@@ -5,6 +5,10 @@
 #include <USBHID.h>
 #include "KProxConsumerHID.h"
 
+#ifndef BOARD_M5STACK_CARDPUTER
+// atoms3: defined here. Cardputer defines it in main.cpp after
+// USBHIDKeyboard USBKeyboard to control TinyUSB HID slot 0 ordering.
 KProxConsumerHID KProxConsumer;
+#endif
 
 #endif

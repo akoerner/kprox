@@ -144,7 +144,7 @@ void AppSettings::_drawPage1() {
         { "  BT Intl Keys",  &bleIntlKeyboardEnabled },
     };
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 6; i++) {
         int ry = CONTENT_Y + i * 22;
         _drawToggleRow(ry, i == _toggleSel, rows[i].label, *rows[i].flag,
                        i == 0 ? connStr : nullptr, connCol);
@@ -450,35 +450,50 @@ void AppSettings::_handlePage3(KeyInput ki) {
 }
 
 // ---- Page 4: Device Identity ----
+// 6 fields, 16px row height → 6×16=96px ≤ 99px available (135 - 22 top - 14 bottom)
 
 void AppSettings::_drawPage4() {
     auto& disp = M5Cardputer.Display;
     disp.fillScreen(SETTINGS_BG);
     _drawTopBar(4);
 
-    const char* labels[4] = { "USB Manufacturer", "USB/BT Product", "Hostname", "USB Serial" };
-    const char* descs[4]  = { "USB mfr descriptor", "BT name + USB product", "mDNS name (reboot)", "USB serial (reboot)" };
-    String* vals[4] = { &usbManufacturer, &usbProduct, &hostnameStr, &usbSerialNumber };
+    String vidStr = String(usbVidOverride, HEX); vidStr.toUpperCase();
+    while (vidStr.length() < 4) vidStr = "0" + vidStr;
+    String pidStr = String(usbPidOverride, HEX); pidStr.toUpperCase();
+    while (pidStr.length() < 4) pidStr = "0" + pidStr;
+
+    const char* labels[6] = {
+        "USB Mfr", "USB/BT Product", "Hostname", "USB Serial",
+        "USB VID (hex)", "USB PID (hex)"
+    };
+    const char* descs[6] = {
+        "USB mfr descriptor", "BT name + USB product",
+        "mDNS name (reboot)", "USB serial (reboot)",
+        "Vendor ID (reboot)", "Product ID (reboot)"
+    };
+    String strs[6] = { usbManufacturer, usbProduct, hostnameStr, usbSerialNumber, vidStr, pidStr };
+
+    static constexpr int ROW_H  = 16;
+    static constexpr int N_ROWS = 6;
     int fieldW = disp.width() - 8;
 
-    for (int i = 0; i < 4; i++) {
-        int y    = CONTENT_Y + i * 26;
+    for (int i = 0; i < N_ROWS; i++) {
+        int y    = CONTENT_Y + i * ROW_H;
         bool sel  = (i == _idSel);
         bool edit = (sel && _editing);
-        if (sel && !edit) disp.fillRect(0, y - 1, disp.width(), 14, selBgColor());
+        if (sel && !edit) disp.fillRect(0, y - 1, disp.width(), ROW_H - 1, selBgColor());
         disp.setTextSize(1);
         uint16_t rowBg = (sel && !edit) ? selBgColor() : (uint16_t)SETTINGS_BG;
         disp.setTextColor(sel ? TFT_WHITE : labelColor(), rowBg);
-        char row[36]; snprintf(row, sizeof(row), "%s%s:", sel ? "> " : "  ", labels[i]);
+        char row[32]; snprintf(row, sizeof(row), "%s%s:", sel ? "> " : "  ", labels[i]);
         disp.drawString(row, 4, y);
 
         if (edit) {
-            _drawInputField(4, y + 13, fieldW, _editBuf, true);
+            _drawInputField(4, y + 1, fieldW, _editBuf, true);
         } else {
-            // value preview on right of label
-            int lw = disp.textWidth(row) + 6;
-            int avail = disp.width() - lw - 8;
-            String preview = *vals[i];
+            int lw = disp.textWidth(row) + 4;
+            int avail = disp.width() - lw - 6;
+            String preview = strs[i];
             if (preview.isEmpty()) preview = descs[i];
             while (preview.length() > 0 && disp.textWidth(preview) > avail)
                 preview = preview.substring(0, preview.length() - 1);
@@ -489,7 +504,7 @@ void AppSettings::_drawPage4() {
 
     if (_idSaved) {
         disp.setTextColor(TFT_GREEN, SETTINGS_BG);
-        disp.drawString("Saved! Reboot for USB/host.", 4, CONTENT_Y + 4 * 26 + 2);
+        disp.drawString("Saved!", 4, CONTENT_Y + N_ROWS * ROW_H + 1);
     }
 
     if (_editing) _drawBottomBar("type  ENTER save  ESC cancel");
@@ -497,16 +512,21 @@ void AppSettings::_drawPage4() {
 }
 
 void AppSettings::_handlePage4(KeyInput ki) {
-    static constexpr int N = 4;
-    String* vals[N] = { &usbManufacturer, &usbProduct, &hostnameStr, &usbSerialNumber };
+    static constexpr int N = 6;
     if (_editing) {
-        if (ki.esc) { _editing = false; _editBuf = ""; _needsRedraw = true; return; }
+        if (ki.esc)   { _editing = false; _editBuf = ""; _needsRedraw = true; return; }
         if (ki.enter) {
             if (_editBuf.length() > 0) {
-                *vals[_idSel] = _editBuf;
-                if (_idSel <= 1) saveUSBIdentitySettings();
-                else             saveHostnameSettings();
-                if (_idSel == 2) hostname = hostnameStr.c_str();
+                if (_idSel == 0) { usbManufacturer = _editBuf; saveUSBIdentitySettings(); }
+                else if (_idSel == 1) { usbProduct = _editBuf; saveUSBIdentitySettings(); }
+                else if (_idSel == 2) { hostnameStr = _editBuf; hostname = hostnameStr.c_str(); saveHostnameSettings(); }
+                else if (_idSel == 3) { usbSerialNumber = _editBuf; saveHostnameSettings(); }
+                else {
+                    uint16_t val = (uint16_t)strtol(_editBuf.c_str(), nullptr, 16);
+                    if (_idSel == 4) usbVidOverride = val;
+                    else             usbPidOverride = val;
+                    saveUSBIdentitySettings();
+                }
                 _idSaved = true;
             }
             _editing = false; _editBuf = ""; _needsRedraw = true; return;
@@ -515,11 +535,23 @@ void AppSettings::_handlePage4(KeyInput ki) {
         if (ki.ch) { _editBuf += ki.ch; _idSaved = false; _needsRedraw = true; }
         return;
     }
-    if (ki.arrowLeft)  { _page = 3; _editing = false; _idSaved = false; _needsRedraw = true; }
+    if (ki.arrowLeft)       { _page = 3; _editing = false; _idSaved = false; _needsRedraw = true; }
     else if (ki.arrowRight) { _page = 5; _needsRedraw = true; }
-    else if (ki.arrowUp)   { _idSel = (_idSel - 1 + N) % N; _idSaved = false; _needsRedraw = true; }
-    else if (ki.arrowDown) { _idSel = (_idSel + 1) % N;      _idSaved = false; _needsRedraw = true; }
-    else if (ki.enter) { _editBuf = *vals[_idSel]; _editing = true; _idSaved = false; _needsRedraw = true; }
+    else if (ki.arrowUp)    { _idSel = (_idSel - 1 + N) % N; _idSaved = false; _needsRedraw = true; }
+    else if (ki.arrowDown)  { _idSel = (_idSel + 1) % N;      _idSaved = false; _needsRedraw = true; }
+    else if (ki.enter) {
+        // pre-populate edit buffer with current value
+        if      (_idSel == 0) _editBuf = usbManufacturer;
+        else if (_idSel == 1) _editBuf = usbProduct;
+        else if (_idSel == 2) _editBuf = hostnameStr;
+        else if (_idSel == 3) _editBuf = usbSerialNumber;
+        else {
+            uint16_t v = (_idSel == 4) ? usbVidOverride : usbPidOverride;
+            _editBuf = String(v, HEX); _editBuf.toUpperCase();
+            while (_editBuf.length() < 4) _editBuf = "0" + _editBuf;
+        }
+        _editing = true; _idSaved = false; _needsRedraw = true;
+    }
 }
 
 // ---- Page 5: Sink Config ----

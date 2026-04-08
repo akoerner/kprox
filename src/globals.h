@@ -117,6 +117,10 @@ extern String wifiPassword;
 extern String apiKey;
 extern String usbManufacturer;
 extern String usbProduct;
+#ifdef BOARD_HAS_USB_HID
+extern uint16_t usbVidOverride;  // 0 = no override; else patched into device descriptor
+extern uint16_t usbPidOverride;
+#endif
 extern const char* hostname;   // points to hostnameStr.c_str()
 extern const char* deviceName;
 

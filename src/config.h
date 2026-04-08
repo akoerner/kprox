@@ -40,6 +40,8 @@
 
 // ---- Default device identity ----
 #define DEFAULT_MANUFACTURER   "KProx"
+#define DEFAULT_USB_VID        0xDEAD   // default spoof VID (settable via Device Identity)
+#define DEFAULT_USB_PID        0xBEEF   // default spoof PID
 #define DEFAULT_PRODUCT_NAME   "Robo Key-mouse"
 #define USB_SERIAL_NUMBER      "KProx-001"
 #define BATTERY_LEVEL          100

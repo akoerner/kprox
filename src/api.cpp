@@ -736,6 +736,10 @@ void handleDevice() {
         JsonDocument doc;
         doc["manufacturer"] = usbManufacturer;
         doc["product"]      = usbProduct;
+#ifdef BOARD_HAS_USB_HID
+        doc["usbVid"]       = usbVidOverride;
+        doc["usbPid"]       = usbPidOverride;
+#endif
         String resp; serializeJson(doc, resp);
         sendEncrypted(200, resp);
 
@@ -747,6 +751,10 @@ void handleDevice() {
         bool changed = false;
         if (doc.containsKey("manufacturer") && doc["manufacturer"].as<String>() != usbManufacturer) { usbManufacturer = doc["manufacturer"].as<String>(); changed = true; }
         if (doc.containsKey("product")      && doc["product"].as<String>()      != usbProduct)      { usbProduct      = doc["product"].as<String>();      changed = true; }
+#ifdef BOARD_HAS_USB_HID
+        if (doc.containsKey("usbVid") && doc["usbVid"].as<uint16_t>() != usbVidOverride) { usbVidOverride = doc["usbVid"].as<uint16_t>(); changed = true; }
+        if (doc.containsKey("usbPid") && doc["usbPid"].as<uint16_t>() != usbPidOverride) { usbPidOverride = doc["usbPid"].as<uint16_t>(); changed = true; }
+#endif
 
         if (changed) {
             saveUSBIdentitySettings();
@@ -864,6 +872,10 @@ void handleSettings() {
         doc["utcOffset"]             = utcOffsetSeconds;
         doc["device"]["manufacturer"] = usbManufacturer;
         doc["device"]["product"]     = usbProduct;
+#ifdef BOARD_HAS_USB_HID
+        doc["device"]["usbVid"]      = usbVidOverride;
+        doc["device"]["usbPid"]      = usbPidOverride;
+#endif
         doc["device"]["hostname"]    = hostnameStr;
         doc["device"]["usb_serial"]  = usbSerialNumber;
         doc["defaultApp"]            = defaultAppIndex;
@@ -976,6 +988,10 @@ void handleSettings() {
             bool changed = false;
             if (device.containsKey("manufacturer") && device["manufacturer"].as<String>() != usbManufacturer) { usbManufacturer = device["manufacturer"].as<String>(); changed = true; }
             if (device.containsKey("product")      && device["product"].as<String>()      != usbProduct)      { usbProduct      = device["product"].as<String>();      changed = true; }
+#ifdef BOARD_HAS_USB_HID
+            if (device.containsKey("usbVid") && device["usbVid"].as<uint16_t>() != usbVidOverride) { usbVidOverride = device["usbVid"].as<uint16_t>(); changed = true; }
+            if (device.containsKey("usbPid") && device["usbPid"].as<uint16_t>() != usbPidOverride) { usbPidOverride = device["usbPid"].as<uint16_t>(); changed = true; }
+#endif
             if (changed) {
                 saveUSBIdentitySettings();
 #ifdef BOARD_HAS_USB_HID

@@ -3688,6 +3688,14 @@ async function loadSettingsTab() {
         if (d.device) {
             _setVal('newDeviceManufacturer', d.device.manufacturer);
             _setVal('newDeviceProduct',      d.device.product);
+            if (d.device.usbVid !== undefined) {
+                const v = d.device.usbVid.toString(16).toUpperCase().padStart(4,'0');
+                _setVal('newUsbVid', v === '0000' ? '' : v);
+            }
+            if (d.device.usbPid !== undefined) {
+                const p = d.device.usbPid.toString(16).toUpperCase().padStart(4,'0');
+                _setVal('newUsbPid', p === '0000' ? '' : p);
+            }
             _setVal('newHostname',           d.device.hostname);
             _setVal('newUsbSerial',          d.device.usb_serial);
         }
@@ -5178,8 +5186,10 @@ async function updateDeviceSettings() {
     const product      = document.getElementById('newDeviceProduct')?.value.trim();
     const hostname_    = document.getElementById('newHostname')?.value.trim();
     const usbSerial    = document.getElementById('newUsbSerial')?.value.trim();
+    const vidStr       = document.getElementById('newUsbVid')?.value.trim().toUpperCase();
+    const pidStr       = document.getElementById('newUsbPid')?.value.trim().toUpperCase();
 
-    if (!manufacturer && !product && !hostname_ && !usbSerial) {
+    if (!manufacturer && !product && !hostname_ && !usbSerial && !vidStr && !pidStr) {
         logDebug('No device identity fields filled in', 'warning');
         return;
     }
@@ -5189,6 +5199,8 @@ async function updateDeviceSettings() {
     if (product)      device.product      = product;
     if (hostname_)    device.hostname     = hostname_;
     if (usbSerial)    device.usb_serial   = usbSerial;
+    if (vidStr)       device.usbVid       = parseInt(vidStr, 16) || 0;
+    if (pidStr)       device.usbPid       = parseInt(pidStr, 16) || 0;
 
     try {
         const resp = await apiFetch(`${getApiEndpoint()}/api/settings`, {
@@ -5219,9 +5231,18 @@ async function loadDeviceSettings() {
             logDebug(`Device data -- ${JSON.stringify(data).substring(0, 120)}`, 'info');
             safeSetText('deviceManufacturer', data.manufacturer || '-');
             safeSetText('deviceProduct', data.product || '-');
+            // VID/PID — display as uppercase 4-char hex
+            const vidHex = data.usbVid !== undefined ? data.usbVid.toString(16).toUpperCase().padStart(4,'0') : '-';
+            const pidHex = data.usbPid !== undefined ? data.usbPid.toString(16).toUpperCase().padStart(4,'0') : '-';
+            safeSetText('deviceVid',    vidHex);
+            safeSetText('devicePid',    pidHex);
+            safeSetText('sidebarVid',   vidHex);
+            safeSetText('sidebarPid',   pidHex);
             // populate settings tab fields if present
             _setVal('newDeviceManufacturer', data.manufacturer);
             _setVal('newDeviceProduct',      data.product);
+            if (data.usbVid !== undefined) _setVal('newUsbVid', vidHex === '0000' ? '' : vidHex);
+            if (data.usbPid !== undefined) _setVal('newUsbPid', pidHex === '0000' ? '' : pidHex);
         }
     } catch (error) {
         console.log('Failed to load device settings:', error.message);

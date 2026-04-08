@@ -83,6 +83,10 @@ void saveUSBIdentitySettings() {
     preferences.begin("kprox", false);
     preferences.putString("usbMfg",     usbManufacturer);
     preferences.putString("usbProduct", usbProduct);
+#ifdef BOARD_HAS_USB_HID
+    preferences.putUShort("usbVid", usbVidOverride);
+    preferences.putUShort("usbPid", usbPidOverride);
+#endif
     preferences.end();
     blinkLED(10, LED_COLOR_SAVE, LED_SAVE_DUTY_CYCLE);
 }
@@ -91,6 +95,10 @@ void loadUSBIdentitySettings() {
     preferences.begin("kprox", false);
     usbManufacturer = preferences.getString("usbMfg",     DEFAULT_MANUFACTURER);
     usbProduct      = preferences.getString("usbProduct", DEFAULT_PRODUCT_NAME);
+#ifdef BOARD_HAS_USB_HID
+    usbVidOverride  = preferences.getUShort("usbVid", DEFAULT_USB_VID);
+    usbPidOverride  = preferences.getUShort("usbPid", DEFAULT_USB_PID);
+#endif
     preferences.end();
 }
 
@@ -330,6 +338,10 @@ void serializeAllSettings(JsonObject& obj) {
 #endif
     obj["usbManufacturer"]        = usbManufacturer;
     obj["usbProduct"]             = usbProduct;
+#ifdef BOARD_HAS_USB_HID
+    obj["usbVid"]                 = usbVidOverride;
+    obj["usbPid"]                 = usbPidOverride;
+#endif
     obj["hostnameStr"]            = hostnameStr;
     obj["usbSerialNumber"]        = usbSerialNumber;
     obj["apiKey"]                 = apiKey;
@@ -392,6 +404,10 @@ void deserializeAllSettings(const JsonObject& obj) {
 #endif
     if (!obj["usbManufacturer"].isNull())   usbManufacturer  = obj["usbManufacturer"].as<String>();
     if (!obj["usbProduct"].isNull())        usbProduct       = obj["usbProduct"].as<String>();
+#ifdef BOARD_HAS_USB_HID
+    if (!obj["usbVid"].isNull())            usbVidOverride   = obj["usbVid"].as<uint16_t>();
+    if (!obj["usbPid"].isNull())            usbPidOverride   = obj["usbPid"].as<uint16_t>();
+#endif
     if (!obj["hostnameStr"].isNull())       { hostnameStr = obj["hostnameStr"].as<String>(); hostname = hostnameStr.c_str(); }
     if (!obj["usbSerialNumber"].isNull())   usbSerialNumber  = obj["usbSerialNumber"].as<String>();
     if (!obj["apiKey"].isNull())            apiKey           = obj["apiKey"].as<String>();
