@@ -249,6 +249,8 @@ void handleApiStatus() {
     btObj["keyboard_enabled"]      = bleKeyboardEnabled;
     btObj["mouse_enabled"]         = bleMouseEnabled;
     btObj["intl_keyboard_enabled"] = bleIntlKeyboardEnabled;
+    btObj["consumer_enabled"]      = bleConsumerEnabled;
+    btObj["system_enabled"]        = bleSystemEnabled;
 
     JsonObject wifiObj = connections["wifi"].to<JsonObject>();
     wifiObj["ssid"]      = wifiSSID;
@@ -267,6 +269,8 @@ void handleApiStatus() {
     usbObj["mouse_enabled"]         = usbMouseEnabled;
     usbObj["intl_keyboard_enabled"] = usbIntlKeyboardEnabled;
     usbObj["fido2_enabled"]         = fido2Enabled;
+    usbObj["consumer_enabled"]      = usbConsumerEnabled;
+    usbObj["system_enabled"]        = usbSystemEnabled;
 #else
     usbObj["supported"] = false; usbObj["enabled"] = false;
     usbObj["initialized"] = false; usbObj["connected"] = false;
@@ -274,6 +278,8 @@ void handleApiStatus() {
     usbObj["keyboard_enabled"] = false; usbObj["mouse_enabled"] = false;
     usbObj["intl_keyboard_enabled"] = false;
     usbObj["fido2_enabled"] = false;
+    usbObj["consumer_enabled"] = false;
+    usbObj["system_enabled"] = false;
 #endif
 
     doc["request_in_progress"] = requestInProgress;
@@ -961,6 +967,8 @@ void handleSettings() {
             if (bt.containsKey("keyboard_enabled"))      { bleKeyboardEnabled      = bt["keyboard_enabled"].as<bool>();      changed = true; }
             if (bt.containsKey("mouse_enabled"))          { bleMouseEnabled          = bt["mouse_enabled"].as<bool>();          changed = true; }
             if (bt.containsKey("intl_keyboard_enabled")) { bleIntlKeyboardEnabled   = bt["intl_keyboard_enabled"].as<bool>(); changed = true; }
+            if (bt.containsKey("consumer_enabled"))      { bleConsumerEnabled       = bt["consumer_enabled"].as<bool>();      changed = true; }
+            if (bt.containsKey("system_enabled"))        { bleSystemEnabled         = bt["system_enabled"].as<bool>();        changed = true; }
             if (changed) saveBtSettings();
         }
 
@@ -1120,6 +1128,14 @@ void handleSettings() {
             }
             if (usb.containsKey("intl_keyboard_enabled")) {
                 usbIntlKeyboardEnabled = usb["intl_keyboard_enabled"].as<bool>();
+                changed = true;
+            }
+            if (usb.containsKey("consumer_enabled")) {
+                usbConsumerEnabled = usb["consumer_enabled"].as<bool>();
+                changed = true;
+            }
+            if (usb.containsKey("system_enabled")) {
+                usbSystemEnabled = usb["system_enabled"].as<bool>();
                 changed = true;
             }
             if (usb.containsKey("fido2_enabled")) {

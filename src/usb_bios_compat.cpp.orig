@@ -31,7 +31,6 @@
 
 #include <stdint.h>
 #include <string.h>
-#include <Preferences.h>
 
 extern "C" uint8_t const* tud_descriptor_device_cb(void);
 extern "C" uint8_t const* tud_descriptor_configuration_cb(uint8_t index);
@@ -73,7 +72,7 @@ void usbBiosCompatPatchDescriptors(void) {
     while (p < end && p[0] > 0) {
         if (p[1] == 0x04 && p[5] == 0x03) {    // Interface descriptor, HID class
             p[6] = 1;   // bInterfaceSubClass = 1 (Boot Interface)
-            { Preferences _p; _p.begin("kprox", true); p[7] = _p.getUChar("hidProto", 1); _p.end(); }
+            p[7] = 1;   // bInterfaceProtocol = 1 (Keyboard)
             p[8] = 0;   // iInterface: suppress
 
             uint8_t* ep_out = nullptr;
@@ -108,23 +107,6 @@ static volatile uint8_t s_hid_protocol = 1;  // matches TinyUSB default (REPORT)
 // receive raw 8-byte boot reports instead of report-ID-prefixed HID reports.
 extern "C" void tud_mount_cb(void) {
     s_hid_protocol = 1;
-}
-
-// On USB disconnect, persist the last protocol used so the next host gets
-// the right bInterfaceProtocol: 0 after BIOS boot-protocol, 1 after OS use.
-extern "C" void tud_umount_cb(void) {
-    uint8_t* cfg = (uint8_t*)tud_descriptor_configuration_cb(0);
-    if (!cfg) return;
-    uint16_t total = (uint16_t)cfg[2] | ((uint16_t)cfg[3] << 8);
-    uint8_t* p = cfg, *end = cfg + total;
-    while (p < end && p[0] > 0) {
-        if (p[1] == 0x04 && p[5] == 0x03) {
-            p[7] = (s_hid_protocol == 0) ? 0 : 1;
-            { Preferences _p; _p.begin("kprox", false); _p.putUChar("hidProto", p[7]); _p.end(); }
-            break;
-        }
-        p += p[0];
-    }
 }
 
 extern "C" void tud_hid_set_protocol_cb(uint8_t itf, uint8_t protocol) {

@@ -13,6 +13,8 @@ void loadBtSettings();
 
 void saveUSBSettings();
 void loadUSBSettings();
+void saveHidProtocol(uint8_t proto);
+uint8_t loadHidProtocol();
 
 void saveUSBIdentitySettings();
 void loadUSBIdentitySettings();

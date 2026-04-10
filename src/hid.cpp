@@ -106,9 +106,9 @@ static void hidMouseScroll(int8_t wheel, int8_t hWheel, HIDRoute r = HIDRoute::B
 }
 
 static void hidExtKey(uint8_t b0, uint8_t b1, HIDRoute r) {
-    if (bleKbOk(r) && bleIntlKeyboardEnabled) BLE_KEYBOARD.writeExtKey(b0, b1);
+    if (r != HIDRoute::USB_ONLY && isBLEConnected() && bleIntlKeyboardEnabled) BLE_KEYBOARD.writeExtKey(b0, b1);
 #ifdef BOARD_HAS_USB_HID
-    if (usbKbOk(r) && usbIntlKeyboardEnabled && KProxConsumer.isReady()) KProxConsumer.sendExtKey(b0, b1);
+    if (r != HIDRoute::BLE_ONLY && isUSBConnected() && usbIntlKeyboardEnabled && KProxConsumer.isReady()) KProxConsumer.sendExtKey(b0, b1);
 #endif
 }
 
@@ -264,12 +264,12 @@ void releaseKeyRaw(HIDRoute r) {
 
 void sendConsumerKey(const MediaKeyReport key, HIDRoute r) {
     if (isHalted || !anyRouteConnected(r)) return;
-    if (bleKbOk(r)) {
+    if (bleKbOk(r) && bleConsumerEnabled) {
         BLE_KEYBOARD.write(key);
         delay(g_keyPressDelay + g_keyReleaseDelay);
     }
 #ifdef BOARD_HAS_USB_HID
-    if (r != HIDRoute::BLE_ONLY && isUSBConnected() && KProxConsumer.isReady()) {
+    if (r != HIDRoute::BLE_ONLY && isUSBConnected() && KProxConsumer.isReady() && usbConsumerEnabled) {
         KProxConsumer.sendConsumer(key[0], key[1], key[2], key[3]);
         delay(g_keyPressDelay);
         KProxConsumer.sendConsumer(0, 0, 0, 0);
@@ -282,12 +282,12 @@ void sendConsumerKey(const MediaKeyReport key, HIDRoute r) {
 
 void sendSystemKey(SystemKeyReport key, HIDRoute r) {
     if (isHalted || !anyRouteConnected(r)) return;
-    if (bleKbOk(r)) {
+    if (bleKbOk(r) && bleSystemEnabled) {
         BLE_KEYBOARD.writeSystemKey(key);
         delay(g_keyPressDelay + g_keyReleaseDelay);
     }
 #ifdef BOARD_HAS_USB_HID
-    if (r != HIDRoute::BLE_ONLY && isUSBConnected() && KProxConsumer.isReady()) {
+    if (r != HIDRoute::BLE_ONLY && isUSBConnected() && KProxConsumer.isReady() && usbSystemEnabled) {
         KProxConsumer.sendSystem(key);
         delay(g_keyPressDelay);
         KProxConsumer.sendSystem(0);

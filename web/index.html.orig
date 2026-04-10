@@ -436,18 +436,6 @@
                                 <input type="checkbox" id="bleMouseEnabled" onchange="setBleSubEnable('mouse_enabled',this.checked)">
                                 BLE Mouse
                             </label>
-                            <label style="font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer;">
-                                <input type="checkbox" id="bleIntlKeyboardEnabled" onchange="setBleSubEnable('intl_keyboard_enabled',this.checked)">
-                                BLE Intl Keys
-                            </label>
-                            <label style="font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer;">
-                                <input type="checkbox" id="bleConsumerEnabled" onchange="setBleSubEnable('consumer_enabled',this.checked)">
-                                BLE Consumer Control
-                            </label>
-                            <label style="font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer;">
-                                <input type="checkbox" id="bleSystemEnabled" onchange="setBleSubEnable('system_enabled',this.checked)">
-                                BLE System Control
-                            </label>
                         </div>
                     </div>
 
@@ -464,18 +452,6 @@
                             <label style="font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer;">
                                 <input type="checkbox" id="usbMouseEnabled" onchange="setUsbSubEnable('mouse_enabled',this.checked)">
                                 USB Mouse
-                            </label>
-                            <label style="font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer;">
-                                <input type="checkbox" id="usbIntlKeyboardEnabled" onchange="setUsbSubEnable('intl_keyboard_enabled',this.checked)">
-                                USB Intl Keys
-                            </label>
-                            <label style="font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer;">
-                                <input type="checkbox" id="usbConsumerEnabled" onchange="setUsbSubEnable('consumer_enabled',this.checked)">
-                                USB Consumer Control
-                            </label>
-                            <label style="font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer;">
-                                <input type="checkbox" id="usbSystemEnabled" onchange="setUsbSubEnable('system_enabled',this.checked)">
-                                USB System Control
                             </label>
                             <label style="font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer;">
                                 <input type="checkbox" id="fido2Enabled" onchange="setUsbSubEnable('fido2_enabled',this.checked)">

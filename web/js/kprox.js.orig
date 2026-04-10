@@ -1929,12 +1929,6 @@ function updateConnectivityUI(data) {
         const bleMo = document.getElementById('bleMouseEnabled');
         if (bleKb) bleKb.checked = bt.keyboard_enabled !== false;
         if (bleMo) bleMo.checked = bt.mouse_enabled    !== false;
-        const bleIntl = document.getElementById('bleIntlKeyboardEnabled');
-        const bleCons = document.getElementById('bleConsumerEnabled');
-        const bleSys  = document.getElementById('bleSystemEnabled');
-        if (bleIntl) bleIntl.checked = bt.intl_keyboard_enabled !== false;
-        if (bleCons) bleCons.checked = bt.consumer_enabled      !== false;
-        if (bleSys)  bleSys.checked  = bt.system_enabled        !== false;
     }
     // USB
     if (data.connections?.usb) {

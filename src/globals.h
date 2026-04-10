@@ -130,6 +130,8 @@ extern bool bluetoothInitialized;
 extern bool bleKeyboardEnabled;    // BLE keyboard sub-enable (requires bluetoothEnabled)
 extern bool bleMouseEnabled;       // BLE mouse sub-enable (requires bluetoothEnabled)
 extern bool bleIntlKeyboardEnabled; // BLE extended (international) keyboard report enable
+extern bool bleConsumerEnabled;
+extern bool bleSystemEnabled;
 
 #ifdef BOARD_HAS_USB_HID
 extern bool usbEnabled;
@@ -139,6 +141,8 @@ extern bool usbMouseReady;
 extern bool usbKeyboardEnabled;
 extern bool usbMouseEnabled;
 extern bool usbIntlKeyboardEnabled; // USB extended (international) keyboard report enable
+extern bool usbConsumerEnabled;
+extern bool usbSystemEnabled;
 extern bool fido2Enabled;
 #endif
 

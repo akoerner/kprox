@@ -40,8 +40,6 @@ void saveBtSettings() {
     preferences.putBool("bleKbEn",     bleKeyboardEnabled);
     preferences.putBool("bleMouseEn",  bleMouseEnabled);
     preferences.putBool("bleIntlKbEn", bleIntlKeyboardEnabled);
-    preferences.putBool("bleConsumerEn", bleConsumerEnabled);
-    preferences.putBool("bleSystemEn",   bleSystemEnabled);
     preferences.end();
     blinkLED(10, LED_COLOR_SAVE, LED_SAVE_DUTY_CYCLE);
 }
@@ -52,8 +50,6 @@ void loadBtSettings() {
     bleKeyboardEnabled     = preferences.getBool("bleKbEn",     true);
     bleMouseEnabled        = preferences.getBool("bleMouseEn",  true);
     bleIntlKeyboardEnabled = preferences.getBool("bleIntlKbEn", true);
-    bleConsumerEnabled     = preferences.getBool("bleConsumerEn", true);
-    bleSystemEnabled       = preferences.getBool("bleSystemEn",   true);
     preferences.end();
 }
 
@@ -64,8 +60,6 @@ void saveUSBSettings() {
     preferences.putBool("usbKbEn",       usbKeyboardEnabled);
     preferences.putBool("usbMouseEn",    usbMouseEnabled);
     preferences.putBool("usbIntlKbEn",   usbIntlKeyboardEnabled);
-    preferences.putBool("usbConsumerEn", usbConsumerEnabled);
-    preferences.putBool("usbSystemEn",   usbSystemEnabled);
     preferences.putBool("fido2En",       fido2Enabled);
     preferences.end();
     blinkLED(10, LED_COLOR_SAVE, LED_SAVE_DUTY_CYCLE);
@@ -77,31 +71,12 @@ void loadUSBSettings() {
     usbKeyboardEnabled     = preferences.getBool("usbKbEn",     true);
     usbMouseEnabled        = preferences.getBool("usbMouseEn",  true);
     usbIntlKeyboardEnabled = preferences.getBool("usbIntlKbEn", true);
-    usbConsumerEnabled     = preferences.getBool("usbConsumerEn", true);
-    usbSystemEnabled       = preferences.getBool("usbSystemEn",   true);
     fido2Enabled           = preferences.getBool("fido2En",     false);
     preferences.end();
-}
-
-void saveHidProtocol(uint8_t proto) {
-    Preferences p;
-    p.begin("kprox", false);
-    p.putUChar("hidProto", proto);
-    p.end();
-}
-
-uint8_t loadHidProtocol() {
-    Preferences p;
-    p.begin("kprox", true);
-    uint8_t v = p.getUChar("hidProto", 1);
-    p.end();
-    return v;
 }
 #else
 void saveUSBSettings() {}
 void loadUSBSettings() {}
-void saveHidProtocol(uint8_t) {}
-uint8_t loadHidProtocol() { return 1; }
 #endif
 
 void saveUSBIdentitySettings() {

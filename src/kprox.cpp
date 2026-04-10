@@ -49,12 +49,16 @@ bool usbMouseReady    = false;
 bool usbKeyboardEnabled    = true;
 bool usbMouseEnabled       = true;
 bool usbIntlKeyboardEnabled = true;
+bool usbConsumerEnabled     = true;
+bool usbSystemEnabled       = true;
 bool fido2Enabled          = false;
 #endif
 
 bool bleKeyboardEnabled    = true;
 bool bleMouseEnabled       = true;
 bool bleIntlKeyboardEnabled = true;
+bool bleConsumerEnabled     = true;
+bool bleSystemEnabled       = true;
 
 // maxSinkSize defined in globals.cpp
 
@@ -532,11 +536,15 @@ bool usbMouseReady         = false;
 bool usbKeyboardEnabled    = true;
 bool usbMouseEnabled       = true;
 bool usbIntlKeyboardEnabled = true;
+bool usbConsumerEnabled     = true;
+bool usbSystemEnabled       = true;
 bool fido2Enabled          = false;
 
 bool bleKeyboardEnabled    = true;
 bool bleMouseEnabled       = true;
 bool bleIntlKeyboardEnabled = true;
+bool bleConsumerEnabled     = true;
+bool bleSystemEnabled       = true;
 
 // maxSinkSize defined in globals.cpp
 
