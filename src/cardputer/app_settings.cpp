@@ -250,8 +250,8 @@ void AppSettings::_handlePage2(KeyInput ki) {
             case 1: usbKeyboardEnabled     = !usbKeyboardEnabled;     saveUSBSettings(); _rebootNote = true; break;
             case 2: usbMouseEnabled        = !usbMouseEnabled;        saveUSBSettings(); _rebootNote = true; break;
             case 3: usbIntlKeyboardEnabled = !usbIntlKeyboardEnabled; saveUSBSettings(); break;
-            case 4: usbConsumerEnabled     = !usbConsumerEnabled;     saveUSBSettings(); break;
-            case 5: usbSystemEnabled       = !usbSystemEnabled;       saveUSBSettings(); break;
+            case 4: usbConsumerEnabled     = !usbConsumerEnabled;     saveUSBSettings(); _rebootNote = true; break;
+            case 5: usbSystemEnabled       = !usbSystemEnabled;       saveUSBSettings(); _rebootNote = true; break;
             case 6: fido2Enabled           = !fido2Enabled;           saveUSBSettings(); _rebootNote = true; break;
         }
         _needsRedraw = true; return;

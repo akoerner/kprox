@@ -110,8 +110,8 @@ extern "C" void tud_mount_cb(void) {
     s_hid_protocol = 1;
 }
 
-// On USB disconnect, persist the last protocol used so the next host gets
-// the right bInterfaceProtocol: 0 after BIOS boot-protocol, 1 after OS use.
+// On disconnect, persist current protocol so the next host gets the right
+// bInterfaceProtocol: 0 after BIOS boot-protocol session, 1 after OS.
 extern "C" void tud_umount_cb(void) {
     uint8_t* cfg = (uint8_t*)tud_descriptor_configuration_cb(0);
     if (!cfg) return;

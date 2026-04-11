@@ -10,8 +10,10 @@
 #define KPROX_SYSTEM_REPORT_ID    4
 #define KPROX_EXT_REPORT_ID       5
 
-static const uint8_t KPROX_CONSUMER_DESC[] = {
-    // Consumer Control — 25 data bits + 7 padding = 4 bytes
+// Each collection gets its own USB HID interface so Linux creates a separate
+// evdev node per collection instead of collapsing them into one.
+
+static const uint8_t KPROX_CONSUMER_ONLY_DESC[] = {
     0x05, 0x0C, 0x09, 0x01, 0xA1, 0x01,
     0x85, KPROX_CONSUMER_REPORT_ID,
     0x05, 0x0C, 0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x19,
@@ -28,19 +30,24 @@ static const uint8_t KPROX_CONSUMER_DESC[] = {
     0x09, 0x6F, 0x09, 0x70,
     0x09, 0x77, 0x09, 0x78, 0x09, 0x79,
     0x09, 0xB8,
-    // byte 3 bit 0: ScreenLock (AL Terminal Lock 0x019E)
+    // byte 3 bit 0: ScreenLock
     0x0A, 0x9E, 0x01,
     0x81, 0x02,
     0x95, 0x07, 0x81, 0x03,
-    0xC0,
+    0xC0
+};
+
+static const uint8_t KPROX_SYSTEM_ONLY_DESC[] = {
     0x05, 0x01, 0x09, 0x80, 0xA1, 0x01,
     0x85, KPROX_SYSTEM_REPORT_ID,
     0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x03,
     0x09, 0x81, 0x09, 0x82, 0x09, 0x83,
     0x81, 0x02,
     0x75, 0x05, 0x95, 0x01, 0x81, 0x03,
-    0xC0,
-    // Extended keyboard keys (International/Lang) — Report ID 5, 11 bits + 5 padding
+    0xC0
+};
+
+static const uint8_t KPROX_EXTKEY_ONLY_DESC[] = {
     0x05, 0x07, 0x09, 0x01, 0xA1, 0x01,
     0x85, KPROX_EXT_REPORT_ID,
     0x05, 0x07, 0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x0B,
@@ -54,53 +61,77 @@ static const uint8_t KPROX_CONSUMER_DESC[] = {
     0xC0
 };
 
-class KProxConsumerHID : public USBHIDDevice {
+// One USB HID interface per collection → one evdev node per collection.
+class KProxHIDSubDev : public USBHIDDevice {
 public:
-    // addDevice() called in constructor so it runs at static init time —
-    // BEFORE USB.begin() builds the config descriptor. This ensures the
-    // consumer+system descriptor bytes are included in tinyusb_hid_device_descriptor_len
-    // when the host requests the USB configuration descriptor.
-    KProxConsumerHID() : _begun(false) {
-        _hid.addDevice(this, sizeof(KPROX_CONSUMER_DESC));
+    USBHID         _hid;
+    const uint8_t* _desc   = nullptr;
+    uint16_t       _len    = 0;
+    bool           _active = false;
+    bool           _begun  = false;
+
+    void preinit(const uint8_t* desc, uint16_t len) {
+        _desc   = desc;
+        _len    = len;
+        _active = true;
+        _hid.addDevice(this, len);
     }
 
-    // begin() creates the send semaphore (needed by SendReport)
     void begin() {
-        if (_begun) return;
-        _hid.begin();
-        _begun = true;
+        if (_active && !_begun) { _hid.begin(); _begun = true; }
+    }
+
+    bool send(uint8_t id, const uint8_t* data, uint8_t dlen) {
+        return _begun && _hid.SendReport(id, data, dlen);
+    }
+
+    uint16_t _onGetDescriptor(uint8_t* buf) override {
+        if (_desc) memcpy(buf, _desc, _len);
+        return _len ? _len : 0;
+    }
+};
+
+class KProxConsumerHID {
+public:
+    KProxHIDSubDev _consumer;
+    KProxHIDSubDev _system;
+    KProxHIDSubDev _extKey;
+
+    // Call after loading USB settings, BEFORE USB.begin().
+    // Only registers the sub-devices that are enabled; each becomes a separate
+    // USB HID interface and therefore a separate evdev node under Linux.
+    void preinit(bool consumer, bool system, bool extkey) {
+        if (consumer) _consumer.preinit(KPROX_CONSUMER_ONLY_DESC, sizeof(KPROX_CONSUMER_ONLY_DESC));
+        if (system)   _system.preinit(KPROX_SYSTEM_ONLY_DESC,     sizeof(KPROX_SYSTEM_ONLY_DESC));
+        if (extkey)   _extKey.preinit(KPROX_EXTKEY_ONLY_DESC,     sizeof(KPROX_EXTKEY_ONLY_DESC));
+    }
+
+    void begin() {
+        _consumer.begin();
+        _system.begin();
+        _extKey.begin();
+    }
+
+    bool isReady() const {
+        return _consumer._begun || _system._begun || _extKey._begun;
     }
 
     bool sendConsumer(uint8_t b0, uint8_t b1, uint8_t b2 = 0, uint8_t b3 = 0) {
-        if (!_begun) return false;
         uint8_t r[4] = {b0, b1, b2, b3};
-        return _hid.SendReport(KPROX_CONSUMER_REPORT_ID, r, 4);
+        return _consumer.send(KPROX_CONSUMER_REPORT_ID, r, 4);
     }
 
     bool sendSystem(uint8_t bits) {
-        if (!_begun) return false;
         uint8_t r[1] = {bits};
-        return _hid.SendReport(KPROX_SYSTEM_REPORT_ID, r, 1);
+        return _system.send(KPROX_SYSTEM_REPORT_ID, r, 1);
     }
 
     bool sendExtKey(uint8_t b0, uint8_t b1) {
-        if (!_begun) return false;
         uint8_t r[2] = {b0, b1};
-        if (!_hid.SendReport(KPROX_EXT_REPORT_ID, r, 2)) return false;
+        if (!_extKey.send(KPROX_EXT_REPORT_ID, r, 2)) return false;
         uint8_t z[2] = {0, 0};
-        return _hid.SendReport(KPROX_EXT_REPORT_ID, z, 2);
+        return _extKey.send(KPROX_EXT_REPORT_ID, z, 2);
     }
-
-    bool isReady() const { return _begun; }
-
-    uint16_t _onGetDescriptor(uint8_t* buf) override {
-        memcpy(buf, KPROX_CONSUMER_DESC, sizeof(KPROX_CONSUMER_DESC));
-        return sizeof(KPROX_CONSUMER_DESC);
-    }
-
-private:
-    USBHID _hid;
-    bool   _begun;
 };
 
 extern KProxConsumerHID KProxConsumer;

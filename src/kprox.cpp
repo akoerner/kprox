@@ -242,9 +242,10 @@ void setup() {
         USB.manufacturerName(usbManufacturer.c_str());
         USB.productName(usbProduct.c_str());
         USB.serialNumber(usbSerialNumber.c_str());
+        KProxConsumer.preinit(usbConsumerEnabled, usbSystemEnabled, usbIntlKeyboardEnabled);
         if (fido2Enabled) FIDO2Device.begin();
         USB.begin();
-        KProxConsumer.begin();  // creates send semaphore; addDevice() ran in constructor
+        KProxConsumer.begin();
         if (usbKeyboardEnabled) { USBKeyboard.begin(); usbKeyboardReady = true; }
         if (usbMouseEnabled)    { USBMouse.begin();    usbMouseReady    = true; }
         usbInitialized = true;
@@ -636,11 +637,10 @@ static void showSplash() {
 void usbBiosCompatPatchDescriptors(void);  // defined in usb_bios_compat.cpp
 void setup() {
     // Device on bus at ~400ms — before M5Cardputer.begin() (~736ms).
-    // ARDUINO_USB_MODE=0: D+ pullup is disabled until USB.begin().
-    // Fast-POST BIOS finishes USB discovery before 736ms; the device is
-    // invisible until this call. All static constructors have run:
-    // usbPreInit set product strings, USBHIDKeyboard/KProxConsumerHID
-    // called addDevice(). usbEnabled defaults true; corrected after settings load.
+    // loadUSBSettings() reads NVS consumer/system/intl flags before USB.begin()
+    // so preinit() registers only the requested HID interfaces in the descriptor.
+    loadUSBSettings();
+    KProxConsumer.preinit(usbConsumerEnabled, usbSystemEnabled, usbIntlKeyboardEnabled);
     USB.begin();
     usbBiosCompatPatchDescriptors();  // patch bDeviceClass=0, SubClass=1, Protocol=1
     USBKeyboard.begin();
