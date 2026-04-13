@@ -1,6 +1,6 @@
 # KProx HID Automation
 
-KProx is a programmable BLE + USB keyboard, international keyboard, and mouse with an encrypted REST API, an on-device keepass credential store,
+KProx is a programmable BLE + USB keyboard, international keyboard, boot protocal/HID boot interface, and mouse with an encrypted REST API, an on-device keepass credential store,
 an scripting engine, and a community gadget library.
 
 KProx runs on the [M5Stack AtomS3 Lite ESP32S3](https://shop.m5stack.com/products/atoms3-lite-esp32s3-dev-kit) and the
