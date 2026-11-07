@@ -9,6 +9,9 @@ KProx runs on the [M5Stack AtomS3 Lite ESP32S3](https://shop.m5stack.com/product
 It presents itself to a paired host as a Bluetooth or USB keyboard and mouse, then accepts input from a web interface or
 REST API, letting you type into, click on, and control any HID-capable device without installing software on it.
 
+KPRox has an implementation of the KeePass database .kdbx for storing and retireveing credential key-value pairs. The database 
+is stored in non-volatile FRAM,or optionally SD card for the card puter, and can be unlocked via the web interface or in the case of the cardputer via the "CredStore" app.
+
 Typical applications: unlocking unattended machines, mouse jiggling, canned text sequences, scripted UI testing,
 automated form entry on devices where you cannot install software.
 
