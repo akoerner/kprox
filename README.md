@@ -4,7 +4,7 @@ KProx is a programmable BLE + USB keyboard, international keyboard, boot protoca
 an scripting engine, and a community gadget library.
 
 KProx runs on the [M5Stack AtomS3 Lite ESP32S3](https://shop.m5stack.com/products/atoms3-lite-esp32s3-dev-kit) and the
-[M5Stack Cardputer Adv ESP32S3](https://shop.m5stack.com/products/m5stack-cardputer-adv-version-esp32-s3).
+[M5Stack Cardputer Adv ESP32S3](https://shop.m5stack.com/products/m5stack-cardputer-adv-version-esp32-s3). It can be easily extended to run on any other ESP32-S3 based device.
 
 It presents itself to a paired host as a Bluetooth or USB keyboard and mouse, then accepts input from a web interface or
 REST API, letting you type into, click on, and control any HID-capable device without installing software on it.
